@@ -6,6 +6,8 @@ services:
     container_name: ai-sql-query-backend
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       PYTHONUNBUFFERED: "1"
     volumes:
