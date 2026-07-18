@@ -1,15 +1,40 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-sql-query-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5436}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: ai-sql-query-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
     env_file:
       - .env
     environment:
       PYTHONUNBUFFERED: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
     volumes:
       - ./backend/app:/app/app
     command: uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
+
+volumes:
+  postgres_data:

@@ -8,12 +8,17 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.db import ping_database
+
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 
 app = FastAPI()
 
 class Health(BaseModel):
     message: str
+
+class DatabaseHealth(BaseModel):
+    connected: bool
     
 class QueryRequest(BaseModel):
     question: str
@@ -37,6 +42,10 @@ chain = prompt | llm
 @app.get("/healthy", response_model=Health)
 async def healthy() -> Health:
     return Health(message="Service is healthy")
+
+@app.get("/db/healthy", response_model=DatabaseHealth)
+def database_healthy() -> DatabaseHealth:
+    return DatabaseHealth(connected=ping_database())
 
 @app.post("/query", response_model=QueryResponse)
 async def query(request: QueryRequest) -> QueryResponse:
