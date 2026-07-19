@@ -13,4 +13,5 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     "sqlalchemy>=2.0.45",
     "alembic>=1.18.5",
+    "python-ulid>=3.2.0",
 ]

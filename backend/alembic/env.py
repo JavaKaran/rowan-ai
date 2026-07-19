@@ -1,9 +1,10 @@
 from logging.config import fileConfig
 import os
 
-from app.db import Base
+from app.models import Base
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+from sqlalchemy.engine import make_url
 
 from alembic import context
 from pathlib import Path
@@ -13,9 +14,24 @@ from dotenv import load_dotenv
 # access to the values within the .ini file in use.
 config = context.config
 
-load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+ROOT_DIR = Path(__file__).resolve().parents[2]
 
-database_url = os.environ["DATABASE_URL"]
+load_dotenv(dotenv_path=ROOT_DIR / ".env")
+
+
+def get_database_url() -> str:
+    database_url = os.environ["DATABASE_URL"]
+    url = make_url(database_url)
+
+    if url.host == "postgres" and not Path("/.dockerenv").exists():
+        url = url.set(
+            host="localhost",
+            port=int(os.getenv("POSTGRES_PORT", "5436")),
+        )
+
+    return url.render_as_string(hide_password=False)
+
+database_url = get_database_url()
 config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
