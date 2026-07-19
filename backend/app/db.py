@@ -1,7 +1,8 @@
 import os
 
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
 
 
 DEFAULT_DATABASE_URL = "postgresql://postgres:postgres@postgres:5432/ai_sql_query"
@@ -19,8 +20,7 @@ SessionLocal = sessionmaker(
 )
 
 
-class Base(DeclarativeBase):
-    pass
+Base = declarative_base()
 
 
 def ping_database() -> bool:
