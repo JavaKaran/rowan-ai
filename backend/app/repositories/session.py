@@ -20,10 +20,13 @@ class SessionRepository:
             self.db.rollback()
             raise SessionAlreadyExists() from exc
 
-    def get_by_key(self, session_key: str) -> Session | None:
+    def get_by_key(self, session_key: str, workspace_id: int) -> Session | None:
         return (
             self.db.query(Session)
-            .filter(Session.session_key == session_key)
+            .filter(
+                Session.session_key == session_key,
+                Session.workspace_id == workspace_id,
+            )
             .one_or_none()
         )
 

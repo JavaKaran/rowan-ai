@@ -10,6 +10,10 @@ class WorkspaceAlreadyExists(AppError):
     pass
 
 
+class WorkspaceKeyMissing(AppError):
+    pass
+
+
 class SessionNotFound(AppError):
     pass
 

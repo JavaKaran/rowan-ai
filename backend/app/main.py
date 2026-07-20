@@ -13,6 +13,7 @@ from app.exceptions import (
     SessionAlreadyExists,
     SessionNotFound,
     WorkspaceAlreadyExists,
+    WorkspaceKeyMissing,
     WorkspaceNotFound,
 )
 from app.routers.session import router as session_router
@@ -38,6 +39,14 @@ async def workspace_already_exists_handler(request: Request, exc: WorkspaceAlrea
     return JSONResponse(
         status_code=409,
         content={"detail": "Workspace already exists"},
+    )
+
+
+@app.exception_handler(WorkspaceKeyMissing)
+async def workspace_key_missing_handler(request: Request, exc: WorkspaceKeyMissing):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "X-Workspace-Key header is required"},
     )
 
 
