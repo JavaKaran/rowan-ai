@@ -8,3 +8,11 @@ class WorkspaceNotFound(AppError):
 
 class WorkspaceAlreadyExists(AppError):
     pass
+
+
+class SessionNotFound(AppError):
+    pass
+
+
+class SessionAlreadyExists(AppError):
+    pass

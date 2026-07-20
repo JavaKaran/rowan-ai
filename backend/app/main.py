@@ -9,7 +9,13 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
-from app.exceptions import WorkspaceAlreadyExists, WorkspaceNotFound
+from app.exceptions import (
+    SessionAlreadyExists,
+    SessionNotFound,
+    WorkspaceAlreadyExists,
+    WorkspaceNotFound,
+)
+from app.routers.session import router as session_router
 from app.routers.workspace import router as workspace_router
 
 from app.db import ping_database
@@ -32,6 +38,22 @@ async def workspace_already_exists_handler(request: Request, exc: WorkspaceAlrea
     return JSONResponse(
         status_code=409,
         content={"detail": "Workspace already exists"},
+    )
+
+
+@app.exception_handler(SessionNotFound)
+async def session_not_found_handler(request: Request, exc: SessionNotFound):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Session not found"},
+    )
+
+
+@app.exception_handler(SessionAlreadyExists)
+async def session_already_exists_handler(request: Request, exc: SessionAlreadyExists):
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Session already exists"},
     )
     
 @app.exception_handler(RequestValidationError)
@@ -125,3 +147,4 @@ async def query_stream(request: QueryRequest):
     )
 
 app.include_router(workspace_router)
+app.include_router(session_router)
