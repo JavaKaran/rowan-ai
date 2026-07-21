@@ -20,3 +20,15 @@ class SessionNotFound(AppError):
 
 class SessionAlreadyExists(AppError):
     pass
+
+
+class SessionKeyMissing(AppError):
+    pass
+
+
+class DatabaseConnectionAlreadyExists(AppError):
+    pass
+
+
+class EncryptionKeyMissing(AppError):
+    pass

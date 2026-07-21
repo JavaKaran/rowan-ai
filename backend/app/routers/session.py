@@ -1,10 +1,8 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.exceptions import WorkspaceKeyMissing
+from app.dependencies import get_workspace_key
 from app.repositories import SessionRepository, WorkspaceRepository
 from app.schemas import SessionCreate, SessionResponse, SessionUpdate
 from app.services import SessionService
@@ -16,15 +14,6 @@ def get_session_service(db: Session = Depends(get_db)) -> SessionService:
     repository = SessionRepository(db)
     workspace_repository = WorkspaceRepository(db)
     return SessionService(repository, workspace_repository)
-
-
-def get_workspace_key(
-    x_workspace_key: Annotated[str | None, Header(alias="X-Workspace-Key")] = None,
-) -> str:
-    if not x_workspace_key or not x_workspace_key.strip():
-        raise WorkspaceKeyMissing()
-
-    return x_workspace_key
 
 
 @router.post("/", response_model=SessionResponse)

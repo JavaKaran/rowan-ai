@@ -10,12 +10,16 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.exceptions import (
+    DatabaseConnectionAlreadyExists,
+    EncryptionKeyMissing,
     SessionAlreadyExists,
+    SessionKeyMissing,
     SessionNotFound,
     WorkspaceAlreadyExists,
     WorkspaceKeyMissing,
     WorkspaceNotFound,
 )
+from app.routers.database_connection import router as database_connection_router
 from app.routers.session import router as session_router
 from app.routers.workspace import router as workspace_router
 
@@ -63,6 +67,33 @@ async def session_already_exists_handler(request: Request, exc: SessionAlreadyEx
     return JSONResponse(
         status_code=409,
         content={"detail": "Session already exists"},
+    )
+
+
+@app.exception_handler(SessionKeyMissing)
+async def session_key_missing_handler(request: Request, exc: SessionKeyMissing):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": "X-Session-Key header is required"},
+    )
+
+
+@app.exception_handler(DatabaseConnectionAlreadyExists)
+async def database_connection_already_exists_handler(
+    request: Request,
+    exc: DatabaseConnectionAlreadyExists,
+):
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Session already has a successful database connection"},
+    )
+
+
+@app.exception_handler(EncryptionKeyMissing)
+async def encryption_key_missing_handler(request: Request, exc: EncryptionKeyMissing):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Database connection encryption key is missing or invalid"},
     )
     
 @app.exception_handler(RequestValidationError)
@@ -157,3 +188,4 @@ async def query_stream(request: QueryRequest):
 
 app.include_router(workspace_router)
 app.include_router(session_router)
+app.include_router(database_connection_router)
