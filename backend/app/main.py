@@ -4,11 +4,13 @@ import json
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
+from asgi_correlation_id import CorrelationIdMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.core import configure_logging, get_logger
 from app.exceptions import (
     DatabaseConnectionAlreadyExists,
     EncryptionKeyMissing,
@@ -19,6 +21,7 @@ from app.exceptions import (
     WorkspaceKeyMissing,
     WorkspaceNotFound,
 )
+from app.middleware import RequestLoggingMiddleware
 from app.routers.database_connection import router as database_connection_router
 from app.routers.session import router as session_router
 from app.routers.workspace import router as workspace_router
@@ -26,12 +29,17 @@ from app.routers.workspace import router as workspace_router
 from app.db import ping_database
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
+configure_logging()
+logger = get_logger(__name__)
 
 app = FastAPI()
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
 
 
 @app.exception_handler(WorkspaceNotFound)
 async def workspace_not_found_handler(request: Request, exc: WorkspaceNotFound):
+    logger.warning("workspace.not_found", path=request.url.path)
     return JSONResponse(
         status_code=404,
         content={"detail": "Workspace not found"},
@@ -40,6 +48,7 @@ async def workspace_not_found_handler(request: Request, exc: WorkspaceNotFound):
 
 @app.exception_handler(WorkspaceAlreadyExists)
 async def workspace_already_exists_handler(request: Request, exc: WorkspaceAlreadyExists):
+    logger.warning("workspace.already_exists", path=request.url.path)
     return JSONResponse(
         status_code=409,
         content={"detail": "Workspace already exists"},
@@ -48,6 +57,7 @@ async def workspace_already_exists_handler(request: Request, exc: WorkspaceAlrea
 
 @app.exception_handler(WorkspaceKeyMissing)
 async def workspace_key_missing_handler(request: Request, exc: WorkspaceKeyMissing):
+    logger.warning("workspace.key_missing", path=request.url.path)
     return JSONResponse(
         status_code=400,
         content={"detail": "X-Workspace-Key header is required"},
@@ -56,6 +66,7 @@ async def workspace_key_missing_handler(request: Request, exc: WorkspaceKeyMissi
 
 @app.exception_handler(SessionNotFound)
 async def session_not_found_handler(request: Request, exc: SessionNotFound):
+    logger.warning("session.not_found", path=request.url.path)
     return JSONResponse(
         status_code=404,
         content={"detail": "Session not found"},
@@ -64,6 +75,7 @@ async def session_not_found_handler(request: Request, exc: SessionNotFound):
 
 @app.exception_handler(SessionAlreadyExists)
 async def session_already_exists_handler(request: Request, exc: SessionAlreadyExists):
+    logger.warning("session.already_exists", path=request.url.path)
     return JSONResponse(
         status_code=409,
         content={"detail": "Session already exists"},
@@ -72,6 +84,7 @@ async def session_already_exists_handler(request: Request, exc: SessionAlreadyEx
 
 @app.exception_handler(SessionKeyMissing)
 async def session_key_missing_handler(request: Request, exc: SessionKeyMissing):
+    logger.warning("session.key_missing", path=request.url.path)
     return JSONResponse(
         status_code=400,
         content={"detail": "X-Session-Key header is required"},
@@ -83,6 +96,7 @@ async def database_connection_already_exists_handler(
     request: Request,
     exc: DatabaseConnectionAlreadyExists,
 ):
+    logger.warning("database_connection.already_exists", path=request.url.path)
     return JSONResponse(
         status_code=409,
         content={"detail": "Session already has a successful database connection"},
@@ -91,6 +105,7 @@ async def database_connection_already_exists_handler(
 
 @app.exception_handler(EncryptionKeyMissing)
 async def encryption_key_missing_handler(request: Request, exc: EncryptionKeyMissing):
+    logger.error("database_connection.encryption_key_missing_or_invalid", path=request.url.path)
     return JSONResponse(
         status_code=500,
         content={"detail": "Database connection encryption key is missing or invalid"},
@@ -98,6 +113,11 @@ async def encryption_key_missing_handler(request: Request, exc: EncryptionKeyMis
     
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    logger.warning(
+        "request.validation_failed",
+        path=request.url.path,
+        error_count=len(exc.errors()),
+    )
     errors = []
     
     for error in exc.errors():

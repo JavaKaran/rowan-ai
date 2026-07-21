@@ -5,6 +5,7 @@ from sqlalchemy import URL, create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
 
+from app.core import get_logger, mask_value
 from app.exceptions import (
     DatabaseConnectionAlreadyExists,
     EncryptionKeyMissing,
@@ -18,6 +19,8 @@ from app.repositories import (
     WorkspaceRepository,
 )
 from app.schemas import DatabaseConnectionCreate
+
+logger = get_logger(__name__)
 
 
 class DatabaseConnectionService:
@@ -37,15 +40,40 @@ class DatabaseConnectionService:
         session_key: str,
         payload: DatabaseConnectionCreate,
     ) -> DatabaseConnection:
+        logger.info(
+            "database_connection.create_started",
+            workspace_key=mask_value(workspace_key),
+            session_key=mask_value(session_key),
+            database_type=payload.database_type,
+            host=payload.host,
+            port=payload.port,
+            database_name=payload.database_name,
+            username=mask_value(payload.username),
+            ssl_mode=payload.ssl_mode,
+        )
+
         workspace = self.workspace_repository.get_by_key(workspace_key)
         if not workspace:
+            logger.warning(
+                "database_connection.workspace_not_found",
+                workspace_key=mask_value(workspace_key),
+            )
             raise WorkspaceNotFound()
 
         session = self.session_repository.get_by_key(session_key, workspace.id)
         if not session:
+            logger.warning(
+                "database_connection.session_not_found",
+                workspace_id=workspace.id,
+                session_key=mask_value(session_key),
+            )
             raise SessionNotFound()
 
         if self.repository.has_successful_connection(session.id):
+            logger.warning(
+                "database_connection.already_exists",
+                session_id=session.id,
+            )
             raise DatabaseConnectionAlreadyExists()
 
         success, message = self._validate_connection(payload)
@@ -62,10 +90,32 @@ class DatabaseConnectionService:
             status_message=message,
         )
 
-        return self.repository.create(connection)
+        connection = self.repository.create(connection)
+        logger.info(
+            "database_connection.saved",
+            connection_id=connection.id,
+            session_id=session.id,
+            success=connection.is_connected,
+            database_type=connection.database_type,
+            host=connection.host,
+            port=connection.port,
+            database_name=connection.database_name,
+        )
+
+        return connection
 
     def _validate_connection(self, payload: DatabaseConnectionCreate) -> tuple[bool, str]:
         engine = None
+        logger.info(
+            "database_connection.validation_started",
+            database_type=payload.database_type,
+            host=payload.host,
+            port=payload.port,
+            database_name=payload.database_name,
+            username=mask_value(payload.username),
+            ssl_mode=payload.ssl_mode,
+        )
+
         try:
             engine = create_engine(
                 self._build_database_url(payload),
@@ -80,12 +130,35 @@ class DatabaseConnectionService:
                 result = connection.execute(text("select 1"))
                 result.scalar_one()
 
+            logger.info(
+                "database_connection.validation_succeeded",
+                database_type=payload.database_type,
+                host=payload.host,
+                port=payload.port,
+                database_name=payload.database_name,
+            )
             return True, "Database connection established successfully."
         except (ImportError, SQLAlchemyError) as exc:
-            return False, f"Database connection failed: {self._format_connection_error(exc)}"
+            error_message = self._format_connection_error(exc)
+            logger.warning(
+                "database_connection.validation_failed",
+                database_type=payload.database_type,
+                host=payload.host,
+                port=payload.port,
+                database_name=payload.database_name,
+                error=error_message,
+            )
+            return False, f"Database connection failed: {error_message}"
         finally:
             if engine:
                 engine.dispose()
+                logger.info(
+                    "database_connection.validation_engine_disposed",
+                    database_type=payload.database_type,
+                    host=payload.host,
+                    port=payload.port,
+                    database_name=payload.database_name,
+                )
 
     def _build_database_url(self, payload: DatabaseConnectionCreate) -> URL:
         drivername = {
@@ -119,11 +192,13 @@ class DatabaseConnectionService:
     def _encrypt_password(self, password: str) -> str:
         key = os.getenv("DATABASE_CONNECTION_ENCRYPTION_KEY")
         if not key:
+            logger.error("database_connection.encryption_key_missing")
             raise EncryptionKeyMissing()
 
         try:
             return Fernet(key.encode()).encrypt(password.encode()).decode()
         except (ValueError, InvalidToken) as exc:
+            logger.error("database_connection.encryption_key_invalid")
             raise EncryptionKeyMissing() from exc
 
     def _format_connection_error(self, exc: Exception) -> str:

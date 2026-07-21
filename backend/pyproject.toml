@@ -5,6 +5,7 @@ description = "AI SQL Query"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "asgi-correlation-id>=4.3.4",
     "fastapi[standard]",
     "python-dotenv",
     "pydantic",
@@ -15,5 +16,6 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     "sqlalchemy>=2.0.45",
     "alembic>=1.18.5",
+    "structlog>=25.5.0",
     "python-ulid>=3.2.0",
 ]
