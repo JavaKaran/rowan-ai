@@ -21,3 +21,7 @@ class DatabaseConnection(Base, TimestampMixin):
     status_message: Mapped[str] = mapped_column(Text, nullable=False)
 
     session: Mapped[Session] = relationship()
+    metadata_record: Mapped["DatabaseMetadata | None"] = relationship(
+        back_populates="database_connection",
+        uselist=False,
+    )

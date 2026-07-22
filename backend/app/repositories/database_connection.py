@@ -14,7 +14,14 @@ class DatabaseConnectionRepository:
 
         return connection
 
-    def has_successful_connection(self, session_id: int) -> bool:
+    def get_by_id(self, connection_id: int) -> DatabaseConnection | None:
+        return (
+            self.db.query(DatabaseConnection)
+            .filter(DatabaseConnection.id == connection_id)
+            .first()
+        )
+
+    def get_successful_connection(self, session_id: int) -> DatabaseConnection | None:
         return (
             self.db.query(DatabaseConnection)
             .filter(
@@ -22,5 +29,7 @@ class DatabaseConnectionRepository:
                 DatabaseConnection.is_connected.is_(True),
             )
             .first()
-            is not None
         )
+
+    def has_successful_connection(self, session_id: int) -> bool:
+        return self.get_successful_connection(session_id) is not None

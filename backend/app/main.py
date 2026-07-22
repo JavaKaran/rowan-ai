@@ -99,7 +99,7 @@ async def database_connection_already_exists_handler(
     logger.warning("database_connection.already_exists", path=request.url.path)
     return JSONResponse(
         status_code=409,
-        content={"detail": "Session already has a successful database connection"},
+        content={"detail": "Session already has a different successful database connection"},
     )
 
 

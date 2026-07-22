@@ -5,22 +5,32 @@ from app.db import get_db
 from app.dependencies import get_session_key, get_workspace_key
 from app.repositories import (
     DatabaseConnectionRepository,
+    DatabaseMetadataRepository,
     SessionRepository,
     WorkspaceRepository,
 )
 from app.schemas import DatabaseConnectionCreate, DatabaseConnectionResponse
 from app.services import DatabaseConnectionService
+from app.services.metadata_jobs import MetadataJobDispatcher, get_metadata_job_dispatcher
 
 router = APIRouter(prefix="/connection", tags=["connection"])
 
 
 def get_database_connection_service(
     db: Session = Depends(get_db),
+    metadata_job_dispatcher: MetadataJobDispatcher = Depends(get_metadata_job_dispatcher),
 ) -> DatabaseConnectionService:
     repository = DatabaseConnectionRepository(db)
+    metadata_repository = DatabaseMetadataRepository(db)
     session_repository = SessionRepository(db)
     workspace_repository = WorkspaceRepository(db)
-    return DatabaseConnectionService(repository, session_repository, workspace_repository)
+    return DatabaseConnectionService(
+        repository,
+        metadata_repository,
+        metadata_job_dispatcher,
+        session_repository,
+        workspace_repository,
+    )
 
 
 @router.post("/", response_model=DatabaseConnectionResponse)

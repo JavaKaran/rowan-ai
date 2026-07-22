@@ -1,24 +1,29 @@
-import os
-
-from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import URL, create_engine, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import QueuePool
 
+from app.core.database_connections import (
+    build_connect_args,
+    build_database_url,
+    decrypt_password,
+    encrypt_password,
+    format_database_error,
+)
 from app.core import get_logger, mask_value
 from app.exceptions import (
     DatabaseConnectionAlreadyExists,
-    EncryptionKeyMissing,
     SessionNotFound,
     WorkspaceNotFound,
 )
 from app.models import DatabaseConnection
 from app.repositories import (
     DatabaseConnectionRepository,
+    DatabaseMetadataRepository,
     SessionRepository,
     WorkspaceRepository,
 )
 from app.schemas import DatabaseConnectionCreate
+from app.services.metadata_jobs import MetadataJobDispatcher
 
 logger = get_logger(__name__)
 
@@ -27,10 +32,14 @@ class DatabaseConnectionService:
     def __init__(
         self,
         repository: DatabaseConnectionRepository,
+        metadata_repository: DatabaseMetadataRepository,
+        metadata_job_dispatcher: MetadataJobDispatcher,
         session_repository: SessionRepository,
         workspace_repository: WorkspaceRepository,
     ):
         self.repository = repository
+        self.metadata_repository = metadata_repository
+        self.metadata_job_dispatcher = metadata_job_dispatcher
         self.session_repository = session_repository
         self.workspace_repository = workspace_repository
 
@@ -69,12 +78,28 @@ class DatabaseConnectionService:
             )
             raise SessionNotFound()
 
-        if self.repository.has_successful_connection(session.id):
-            logger.warning(
-                "database_connection.already_exists",
+        existing_connection = self.repository.get_successful_connection(session.id)
+        if existing_connection:
+            if not self._is_same_connection(existing_connection, payload):
+                logger.warning(
+                    "database_connection.different_connection_already_exists",
+                    session_id=session.id,
+                    existing_connection_id=existing_connection.id,
+                    database_type=payload.database_type,
+                    host=payload.host,
+                    port=payload.port,
+                    database_name=payload.database_name,
+                    username=mask_value(payload.username),
+                )
+                raise DatabaseConnectionAlreadyExists()
+
+            self._enqueue_metadata_parsing(existing_connection)
+            logger.info(
+                "database_connection.existing_reused",
+                connection_id=existing_connection.id,
                 session_id=session.id,
             )
-            raise DatabaseConnectionAlreadyExists()
+            return existing_connection
 
         success, message = self._validate_connection(payload)
         connection = DatabaseConnection(
@@ -84,13 +109,22 @@ class DatabaseConnectionService:
             port=payload.port,
             database_name=payload.database_name,
             username=payload.username,
-            encrypted_password=self._encrypt_password(payload.password.get_secret_value()),
+            encrypted_password=encrypt_password(payload.password.get_secret_value()),
             ssl_mode=payload.ssl_mode,
             is_connected=success,
             status_message=message,
         )
 
         connection = self.repository.create(connection)
+
+        if connection.is_connected:
+            self.metadata_repository.create_pending(connection.id)
+            self.metadata_job_dispatcher.enqueue_parse_metadata(connection.id)
+            logger.info(
+                "database_connection.metadata_parse_enqueued",
+                connection_id=connection.id,
+            )
+
         logger.info(
             "database_connection.saved",
             connection_id=connection.id,
@@ -103,6 +137,42 @@ class DatabaseConnectionService:
         )
 
         return connection
+
+    def _is_same_connection(
+        self,
+        connection: DatabaseConnection,
+        payload: DatabaseConnectionCreate,
+    ) -> bool:
+        return (
+            connection.database_type == payload.database_type
+            and connection.host == payload.host
+            and connection.port == payload.port
+            and connection.database_name == payload.database_name
+            and connection.username == payload.username
+            and connection.ssl_mode == payload.ssl_mode
+            and decrypt_password(connection.encrypted_password)
+            == payload.password.get_secret_value()
+        )
+
+    def _enqueue_metadata_parsing(self, connection: DatabaseConnection) -> None:
+        metadata = self.metadata_repository.get_by_connection_id(connection.id)
+
+        if metadata:
+            self.metadata_repository.update_status(
+                metadata,
+                "pending",
+                progress_current=0,
+                progress_total=0,
+                error_message=None,
+            )
+        else:
+            self.metadata_repository.create_pending(connection.id)
+
+        self.metadata_job_dispatcher.enqueue_parse_metadata(connection.id)
+        logger.info(
+            "database_connection.metadata_parse_enqueued",
+            connection_id=connection.id,
+        )
 
     def _validate_connection(self, payload: DatabaseConnectionCreate) -> tuple[bool, str]:
         engine = None
@@ -118,13 +188,13 @@ class DatabaseConnectionService:
 
         try:
             engine = create_engine(
-                self._build_database_url(payload),
+                build_database_url(payload),
                 poolclass=QueuePool,
                 pool_size=1,
                 max_overflow=0,
                 pool_pre_ping=True,
                 pool_timeout=5,
-                connect_args=self._build_connect_args(payload),
+                connect_args=build_connect_args(payload.database_type),
             )
             with engine.connect() as connection:
                 result = connection.execute(text("select 1"))
@@ -139,7 +209,7 @@ class DatabaseConnectionService:
             )
             return True, "Database connection established successfully."
         except (ImportError, SQLAlchemyError) as exc:
-            error_message = self._format_connection_error(exc)
+            error_message = format_database_error(exc)
             logger.warning(
                 "database_connection.validation_failed",
                 database_type=payload.database_type,
@@ -159,48 +229,3 @@ class DatabaseConnectionService:
                     port=payload.port,
                     database_name=payload.database_name,
                 )
-
-    def _build_database_url(self, payload: DatabaseConnectionCreate) -> URL:
-        drivername = {
-            "postgresql": "postgresql+psycopg2",
-            "mysql": "mysql+pymysql",
-        }[payload.database_type]
-
-        query = {}
-        if payload.database_type == "postgresql" and payload.ssl_mode:
-            query["sslmode"] = payload.ssl_mode
-
-        return URL.create(
-            drivername=drivername,
-            username=payload.username,
-            password=payload.password.get_secret_value(),
-            host=payload.host,
-            port=payload.port,
-            database=payload.database_name,
-            query=query,
-        )
-
-    def _build_connect_args(self, payload: DatabaseConnectionCreate) -> dict:
-        if payload.database_type == "postgresql":
-            return {"connect_timeout": 5}
-
-        if payload.database_type == "mysql":
-            return {"connect_timeout": 5}
-
-        return {}
-
-    def _encrypt_password(self, password: str) -> str:
-        key = os.getenv("DATABASE_CONNECTION_ENCRYPTION_KEY")
-        if not key:
-            logger.error("database_connection.encryption_key_missing")
-            raise EncryptionKeyMissing()
-
-        try:
-            return Fernet(key.encode()).encrypt(password.encode()).decode()
-        except (ValueError, InvalidToken) as exc:
-            logger.error("database_connection.encryption_key_invalid")
-            raise EncryptionKeyMissing() from exc
-
-    def _format_connection_error(self, exc: Exception) -> str:
-        message = str(exc.orig) if getattr(exc, "orig", None) else str(exc)
-        return message.splitlines()[0]
