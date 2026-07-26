@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks
 from app.exceptions import DatabaseConnectionAlreadyExists
 from app.schemas import DatabaseConnectionCreate
 from app.services.database_connection import DatabaseConnectionService
+from app.services.database_connection_runtime import DatabaseConnectionRuntime
 from app.core.database_connections import encrypt_password
 from app.services.database_metadata import DatabaseMetadataService
 from app.services.metadata_jobs import FastAPIMetadataJobDispatcher
@@ -25,6 +26,24 @@ class FakeInspector:
                     "name": "user_id",
                     "type": "INTEGER",
                     "nullable": False,
+                    "default": None,
+                },
+                {
+                    "name": "status",
+                    "type": FakeEnumType("uploadstatus", ["PENDING", "COMPLETED", "FAILED"]),
+                    "nullable": False,
+                    "default": None,
+                },
+                {
+                    "name": "payload",
+                    "type": FakeJSONBType(),
+                    "nullable": True,
+                    "default": None,
+                },
+                {
+                    "name": "tags",
+                    "type": FakeArrayType("VARCHAR"),
+                    "nullable": True,
                     "default": None,
                 },
             ],
@@ -71,6 +90,36 @@ class FakeMetadataRepository:
         return metadata
 
 
+class FakeEnumType:
+    def __init__(self, name, enums):
+        self.name = name
+        self.enums = enums
+
+    def __str__(self):
+        return "VARCHAR(10)"
+
+
+class FakeJSONBType:
+    def __str__(self):
+        return "JSONB"
+
+
+class FakeScalarType:
+    def __init__(self, type_name):
+        self.type_name = type_name
+
+    def __str__(self):
+        return self.type_name
+
+
+class FakeArrayType:
+    def __init__(self, item_type):
+        self.item_type = FakeScalarType(item_type)
+
+    def __str__(self):
+        return f"{self.item_type}[]"
+
+
 class DatabaseMetadataServiceTest(unittest.TestCase):
     def test_build_metadata_json_includes_primary_keys_foreign_keys_and_relationships(self):
         metadata_repository = FakeMetadataRepository()
@@ -78,6 +127,7 @@ class DatabaseMetadataServiceTest(unittest.TestCase):
             db=SimpleNamespace(),
             connection_repository=SimpleNamespace(),
             metadata_repository=metadata_repository,
+            connection_runtime=DatabaseConnectionRuntime(),
         )
 
         metadata_json = service._build_metadata_json(
@@ -96,6 +146,13 @@ class DatabaseMetadataServiceTest(unittest.TestCase):
 
         self.assertEqual(users_table["primary_key"], ["id"])
         self.assertEqual(orders_table["foreign_keys"][0]["columns"], ["user_id"])
+        self.assertEqual(orders_table["columns"][2]["type"], "uploadstatus")
+        self.assertEqual(
+            orders_table["columns"][2]["enum_values"],
+            ["PENDING", "COMPLETED", "FAILED"],
+        )
+        self.assertEqual(orders_table["columns"][3]["json_kind"], "jsonb")
+        self.assertEqual(orders_table["columns"][4]["array_item_type"], "VARCHAR")
         self.assertEqual(
             metadata_json["relationships"],
             [
@@ -288,6 +345,7 @@ class DatabaseConnectionServiceReconnectTest(unittest.TestCase):
             workspace_repository=SimpleNamespace(
                 get_by_key=lambda workspace_key: SimpleNamespace(id=789)
             ),
+            connection_runtime=DatabaseConnectionRuntime(),
         )
 
     def _payload(self, database_name="app_db"):

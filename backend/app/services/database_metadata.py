@@ -1,20 +1,14 @@
-from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session as DBSession
-from sqlalchemy.pool import QueuePool
 
 from app.core import get_logger
-from app.core.database_connections import (
-    build_connect_args,
-    build_database_url,
-    decrypt_password,
-    format_database_error,
-)
+from app.core.database_connections import format_database_error
 from app.db import SessionLocal
 from app.models import DatabaseConnection, DatabaseMetadata
 from app.repositories import DatabaseConnectionRepository, DatabaseMetadataRepository
+from app.services.database_connection_runtime import DatabaseConnectionRuntime
 
 logger = get_logger(__name__)
 
@@ -28,6 +22,7 @@ def parse_database_metadata_job(database_connection_id: int) -> None:
             db=db,
             connection_repository=DatabaseConnectionRepository(db),
             metadata_repository=DatabaseMetadataRepository(db),
+            connection_runtime=DatabaseConnectionRuntime(),
         )
         service.parse_connection_metadata(database_connection_id)
 
@@ -38,10 +33,12 @@ class DatabaseMetadataService:
         db: DBSession,
         connection_repository: DatabaseConnectionRepository,
         metadata_repository: DatabaseMetadataRepository,
+        connection_runtime: DatabaseConnectionRuntime,
     ):
         self.db = db
         self.connection_repository = connection_repository
         self.metadata_repository = metadata_repository
+        self.connection_runtime = connection_runtime
 
     def parse_connection_metadata(self, database_connection_id: int) -> None:
         metadata = self.metadata_repository.get_by_connection_id(database_connection_id)
@@ -68,25 +65,7 @@ class DatabaseMetadataService:
             )
             self.metadata_repository.update_status(metadata, "connecting")
 
-            engine = create_engine(
-                build_database_url(
-                    _ConnectionURLInput(
-                        database_type=connection.database_type,
-                        username=connection.username,
-                        password=decrypt_password(connection.encrypted_password),
-                        host=connection.host,
-                        port=connection.port,
-                        database_name=connection.database_name,
-                        ssl_mode=connection.ssl_mode,
-                    )
-                ),
-                poolclass=QueuePool,
-                pool_size=1,
-                max_overflow=0,
-                pool_pre_ping=True,
-                pool_timeout=5,
-                connect_args=build_connect_args(connection.database_type),
-            )
+            engine = self.connection_runtime.create_engine_for_connection(connection)
 
             with engine.connect() as db_connection:
                 db_connection.execute(text("select 1")).scalar_one()
@@ -197,12 +176,7 @@ class DatabaseMetadataService:
         table_name: str,
     ) -> dict[str, Any]:
         columns = [
-            {
-                "name": column["name"],
-                "type": str(column["type"]),
-                "nullable": column.get("nullable"),
-                "default": self._to_json_value(column.get("default")),
-            }
+            self._build_column_metadata(column)
             for column in inspector.get_columns(table_name, schema=schema_name)
         ]
         primary_key = inspector.get_pk_constraint(table_name, schema=schema_name)
@@ -222,6 +196,60 @@ class DatabaseMetadataService:
             "primary_key": primary_key.get("constrained_columns", []),
             "foreign_keys": foreign_keys,
         }
+
+    def _build_column_metadata(self, column: dict[str, Any]) -> dict[str, Any]:
+        column_type = column["type"]
+        metadata = {
+            "name": column["name"],
+            "type": self._get_type_name(column_type),
+            "nullable": column.get("nullable"),
+            "default": self._to_json_value(column.get("default")),
+        }
+
+        enum_values = self._get_enum_values(column_type)
+        if enum_values:
+            metadata["enum_values"] = enum_values
+
+        json_kind = self._get_json_kind(column_type)
+        if json_kind:
+            metadata["json_kind"] = json_kind
+
+        array_item_type = self._get_array_item_type(column_type)
+        if array_item_type:
+            metadata["array_item_type"] = array_item_type
+
+        return metadata
+
+    def _get_type_name(self, column_type: Any) -> str:
+        if self._get_enum_values(column_type) and getattr(column_type, "name", None):
+            return str(column_type.name)
+
+        return str(column_type)
+
+    def _get_enum_values(self, column_type: Any) -> list[str] | None:
+        enum_values = getattr(column_type, "enums", None)
+        if not enum_values:
+            return None
+
+        return [str(value) for value in enum_values]
+
+    def _get_json_kind(self, column_type: Any) -> str | None:
+        type_name = self._get_type_class_name(column_type)
+        if type_name == "JSONB":
+            return "jsonb"
+        if type_name == "JSON":
+            return "json"
+        return None
+
+    def _get_array_item_type(self, column_type: Any) -> str | None:
+        item_type = getattr(column_type, "item_type", None)
+        if item_type is None:
+            return None
+
+        return self._get_type_name(item_type)
+
+    def _get_type_class_name(self, column_type: Any) -> str:
+        return column_type.__class__.__name__.upper()
 
     def _get_schema_names(
         self,
@@ -263,14 +291,3 @@ class DatabaseMetadataService:
             return value
 
         return str(value)
-
-
-@dataclass
-class _ConnectionURLInput:
-    database_type: str
-    username: str
-    password: str
-    host: str
-    port: int
-    database_name: str
-    ssl_mode: str | None

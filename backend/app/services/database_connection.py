@@ -23,6 +23,7 @@ from app.repositories import (
     WorkspaceRepository,
 )
 from app.schemas import DatabaseConnectionCreate
+from app.services.database_connection_runtime import DatabaseConnectionRuntime
 from app.services.metadata_jobs import MetadataJobDispatcher
 
 logger = get_logger(__name__)
@@ -36,12 +37,14 @@ class DatabaseConnectionService:
         metadata_job_dispatcher: MetadataJobDispatcher,
         session_repository: SessionRepository,
         workspace_repository: WorkspaceRepository,
+        connection_runtime: DatabaseConnectionRuntime,
     ):
         self.repository = repository
         self.metadata_repository = metadata_repository
         self.metadata_job_dispatcher = metadata_job_dispatcher
         self.session_repository = session_repository
         self.workspace_repository = workspace_repository
+        self.connection_runtime = connection_runtime
 
     def create_connection(
         self,
@@ -187,15 +190,7 @@ class DatabaseConnectionService:
         )
 
         try:
-            engine = create_engine(
-                build_database_url(payload),
-                poolclass=QueuePool,
-                pool_size=1,
-                max_overflow=0,
-                pool_pre_ping=True,
-                pool_timeout=5,
-                connect_args=build_connect_args(payload.database_type),
-            )
+            engine = self.connection_runtime.create_engine_for_payload(payload)
             with engine.connect() as connection:
                 result = connection.execute(text("select 1"))
                 result.scalar_one()

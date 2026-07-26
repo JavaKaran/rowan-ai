@@ -1,28 +1,31 @@
 from pathlib import Path
-import json
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse
 from asgi_correlation_id import CorrelationIdMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
-from langchain_core.prompts import ChatPromptTemplate
 
 from app.core import configure_logging, get_logger
 from app.exceptions import (
     DatabaseConnectionAlreadyExists,
+    DatabaseConnectionNotFound,
+    DatabaseMetadataNotReady,
     EncryptionKeyMissing,
+    SQLExecutionFailed,
+    SQLGenerationFailed,
     SessionAlreadyExists,
     SessionKeyMissing,
     SessionNotFound,
+    UnsafeSQLQuery,
     WorkspaceAlreadyExists,
     WorkspaceKeyMissing,
     WorkspaceNotFound,
 )
 from app.middleware import RequestLoggingMiddleware
 from app.routers.database_connection import router as database_connection_router
+from app.routers.query import router as query_router
 from app.routers.session import router as session_router
 from app.routers.workspace import router as workspace_router
 
@@ -143,25 +146,6 @@ class Health(BaseModel):
 
 class DatabaseHealth(BaseModel):
     connected: bool
-    
-class QueryRequest(BaseModel):
-    question: str
-    
-class QueryResponse(BaseModel):
-    sql_query: str
-
-
-llm = ChatGroq(
-    model_name="llama-3.3-70b-versatile",
-    temperature=0.7
-)
-
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a helpful assistant that translates natural language to SQL queries."),
-    ("user", "{question}")
-])
-
-chain = prompt | llm
 
 @app.get("/healthy", response_model=Health)
 async def healthy() -> Health:
@@ -171,41 +155,57 @@ async def healthy() -> Health:
 def database_healthy() -> DatabaseHealth:
     return DatabaseHealth(connected=ping_database())
 
-@app.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest) -> QueryResponse:
-    response = chain.invoke({"question": request.question})
-    return QueryResponse(sql_query=response.content)
+@app.exception_handler(DatabaseConnectionNotFound)
+async def database_connection_not_found_handler(
+    request: Request,
+    exc: DatabaseConnectionNotFound,
+):
+    logger.warning("database_connection.not_found", path=request.url.path)
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "No successful database connection found for this session"},
+    )
 
-def sse_event(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
-@app.post("/query/stream")
-async def query_stream(request: QueryRequest):
-    async def generate():
-        async for chunk in chain.astream({"question": request.question}):
-            content = chunk.content if hasattr(chunk, "content") else str(chunk)
-            
-            if content:
-                yield sse_event("message", {
-                    "content": content,
-                    "finish": False
-                })
-                
-        yield sse_event("message", {
-            "content": content,
-            "finish": True
-        })
-                
-    return StreamingResponse(
-        generate(), 
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
+@app.exception_handler(DatabaseMetadataNotReady)
+async def database_metadata_not_ready_handler(
+    request: Request,
+    exc: DatabaseMetadataNotReady,
+):
+    logger.warning("database_metadata.not_ready", path=request.url.path)
+    return JSONResponse(
+        status_code=409,
+        content={"detail": "Database metadata is not ready for querying"},
+    )
+
+
+@app.exception_handler(UnsafeSQLQuery)
+async def unsafe_sql_query_handler(request: Request, exc: UnsafeSQLQuery):
+    logger.warning("query.unsafe_sql", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(SQLGenerationFailed)
+async def sql_generation_failed_handler(request: Request, exc: SQLGenerationFailed):
+    logger.error("query.generation_failed", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=502,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(SQLExecutionFailed)
+async def sql_execution_failed_handler(request: Request, exc: SQLExecutionFailed):
+    logger.warning("query.execution_failed", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)},
     )
 
 app.include_router(workspace_router)
 app.include_router(session_router)
 app.include_router(database_connection_router)
+app.include_router(query_router)

@@ -11,6 +11,7 @@ from app.repositories import (
 )
 from app.schemas import DatabaseConnectionCreate, DatabaseConnectionResponse
 from app.services import DatabaseConnectionService
+from app.services.database_connection_runtime import DatabaseConnectionRuntime
 from app.services.metadata_jobs import MetadataJobDispatcher, get_metadata_job_dispatcher
 
 router = APIRouter(prefix="/connection", tags=["connection"])
@@ -30,6 +31,7 @@ def get_database_connection_service(
         metadata_job_dispatcher,
         session_repository,
         workspace_repository,
+        DatabaseConnectionRuntime(),
     )
 
 
