@@ -69,10 +69,11 @@ class QueryService:
             workspace_key,
             session_key,
         )
+        validated_question = self.sql_validator.validate_user_request(question)
         previous_context = self._load_previous_context(session.id)
         prompt_input = self.prompt_builder.build(
             metadata_json=metadata_json,
-            question=question,
+            question=validated_question,
             last_user_question=previous_context["last_user_question"],
             last_sql_query=previous_context["last_sql_query"],
         )
@@ -88,7 +89,10 @@ class QueryService:
             prompt_input["system_prompt"],
             prompt_input["prompt_text"],
         )
-        validated_sql = self.sql_validator.validate(generation_result.sql_query)
+        validated_sql = self.sql_validator.validate(
+            generation_result.sql_query,
+            metadata_json=metadata_json,
+        )
         try:
             result = self.query_executor.execute(connection, validated_sql)
         except SQLExecutionFailed as exc:
@@ -96,7 +100,7 @@ class QueryService:
                 workspace_id=workspace.id,
                 session_id=session.id,
                 connection=connection,
-                question=question.strip(),
+                question=validated_question,
                 prompt_input=prompt_input,
                 sql_query=validated_sql,
                 summary=generation_result.summary,
@@ -113,7 +117,7 @@ class QueryService:
             workspace_id=workspace.id,
             session_id=session.id,
             connection=connection,
-            question=question.strip(),
+            question=validated_question,
             prompt_input=prompt_input,
             sql_query=result.sql_query,
             summary=result.summary,
