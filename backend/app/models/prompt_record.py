@@ -16,7 +16,6 @@ class PromptRecord(Base, TimestampMixin):
         unique=True,
     )
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_text: Mapped[str] = mapped_column(Text, nullable=False)
     user_question: Mapped[str] = mapped_column(Text, nullable=False)
 

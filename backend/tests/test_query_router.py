@@ -22,10 +22,7 @@ class QueryRouterTest(unittest.TestCase):
                 "X-Workspace-Key": "workspace-key",
                 "X-Session-Key": "session-key",
             },
-            json={
-                "question": "List users",
-                "system_prompt": "Read-only only",
-            },
+            json={"question": "List users"},
         )
 
         self.assertEqual(response.status_code, 200)
@@ -56,7 +53,7 @@ class QueryRouterTest(unittest.TestCase):
 
 
 class FakeQueryService:
-    def run_query(self, workspace_key, session_key, question, system_prompt=None):
+    def run_query(self, workspace_key, session_key, question):
         return QueryResponse(
             sql_query="SELECT id FROM users LIMIT 1",
             summary="Returns one user ID from the users table.",

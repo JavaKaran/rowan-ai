@@ -53,6 +53,5 @@ def run_query(
         workspace_key=workspace_key,
         session_key=session_key,
         question=payload.question,
-        system_prompt=payload.system_prompt,
     )
     return QueryResponse.model_validate(result.model_dump())

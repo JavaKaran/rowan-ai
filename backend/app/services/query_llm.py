@@ -27,7 +27,7 @@ class LangChainGroqQueryLLMClient:
         self.prompt = ChatPromptTemplate.from_messages(
             [
                 ("system", "{system_prompt}"),
-                ("user", "{user_prompt}"),
+                ("user", "{prompt_text}"),
             ]
         )
         llm = ChatGroq(model_name=model_name, temperature=temperature)
@@ -36,13 +36,13 @@ class LangChainGroqQueryLLMClient:
     def generate_sql(
         self,
         system_prompt: str,
-        user_prompt: str,
+        prompt_text: str,
     ) -> QueryGenerationResult:
         try:
             response = self.chain.invoke(
                 {
                     "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
+                    "prompt_text": prompt_text,
                 }
             )
         except Exception as exc:

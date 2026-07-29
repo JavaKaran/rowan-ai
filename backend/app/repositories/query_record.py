@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session as DBSession
 
-from app.models import QueryRecord
+from app.models import Message, QueryRecord
 
 
 class QueryRecordRepository:
@@ -12,3 +12,15 @@ class QueryRecordRepository:
         self.db.flush()
         self.db.refresh(query_record)
         return query_record
+
+    def get_last_completed_for_session(self, session_id: int) -> QueryRecord | None:
+        return (
+            self.db.query(QueryRecord)
+            .join(Message, QueryRecord.assistant_message_id == Message.id)
+            .filter(
+                Message.session_id == session_id,
+                QueryRecord.status == "completed",
+            )
+            .order_by(QueryRecord.id.desc())
+            .first()
+        )

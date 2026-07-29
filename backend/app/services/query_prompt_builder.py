@@ -10,35 +10,63 @@ DEFAULT_SYSTEM_PROMPT = (
 
 
 class QueryPromptBuilder:
-    _user_prompt_template = (
+    _prompt_template = (
         "Database metadata:\n{metadata}\n\n"
-        "User question:\n{question}\n\n"
+        "{session_context}"
+        "Current user question:\n{question}\n\n"
         "Return a read-only SQL query and a short summary that explains what the query does "
         "and anything important to notice about it."
     )
 
     def build(
         self,
-        system_prompt: str | None,
         metadata_json: dict[str, Any],
         question: str,
+        last_user_question: str | None = None,
+        last_sql_query: str | None = None,
     ) -> dict[str, str]:
-        prompt_system = (system_prompt or DEFAULT_SYSTEM_PROMPT).strip()
         metadata_text = self._format_metadata(metadata_json)
         normalized_question = question.strip()
-        user_prompt = self._build_user_prompt(metadata_text, normalized_question)
+        session_context = self._format_session_context(last_user_question, last_sql_query)
+        prompt_text = self._build_prompt_text(
+            metadata_text,
+            session_context,
+            normalized_question,
+        )
         return {
-            "system_prompt": prompt_system,
+            "system_prompt": DEFAULT_SYSTEM_PROMPT,
             "metadata": metadata_text,
             "question": normalized_question,
-            "user_prompt": user_prompt,
+            "prompt_text": prompt_text,
         }
 
-    def _build_user_prompt(self, metadata_text: str, question: str) -> str:
-        return self._user_prompt_template.format(
+    def _build_prompt_text(
+        self,
+        metadata_text: str,
+        session_context: str,
+        question: str,
+    ) -> str:
+        return self._prompt_template.format(
             metadata=metadata_text,
+            session_context=session_context,
             question=question,
         )
+
+    def _format_session_context(
+        self,
+        last_user_question: str | None,
+        last_sql_query: str | None,
+    ) -> str:
+        context_lines: list[str] = []
+        if last_user_question:
+            context_lines.append(f"last_user_question: {last_user_question}")
+        if last_sql_query:
+            context_lines.append(f"last_sql_query: {last_sql_query}")
+
+        if not context_lines:
+            return ""
+
+        return "Session context:\n" + "\n".join(context_lines) + "\n\n"
 
     def _format_metadata(self, metadata_json: dict[str, Any]) -> str:
         lines = [

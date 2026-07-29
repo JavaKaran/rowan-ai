@@ -16,7 +16,7 @@ from app.exceptions import (
 from app.services.query import QueryService
 from app.schemas import QueryResponse, QueryTokenUsage
 from app.services.query_executor import SQLQueryExecutor
-from app.services.query_prompt_builder import QueryPromptBuilder
+from app.services.query_prompt_builder import DEFAULT_SYSTEM_PROMPT, QueryPromptBuilder
 from app.services.query_validator import ReadOnlySQLValidator
 
 
@@ -25,7 +25,6 @@ class QueryPromptBuilderTest(unittest.TestCase):
         builder = QueryPromptBuilder()
 
         prompt_input = builder.build(
-            system_prompt="Custom system prompt",
             metadata_json={
                 "database_type": "postgresql",
                 "database_name": "analytics",
@@ -90,7 +89,7 @@ class QueryPromptBuilderTest(unittest.TestCase):
             question="List recent orders",
         )
 
-        self.assertEqual(prompt_input["system_prompt"], "Custom system prompt")
+        self.assertEqual(prompt_input["system_prompt"], DEFAULT_SYSTEM_PROMPT)
         self.assertIn("database_name: analytics", prompt_input["metadata"])
         self.assertIn("table: users", prompt_input["metadata"])
         self.assertIn("columns: id (INTEGER), email (VARCHAR)", prompt_input["metadata"])
@@ -103,6 +102,34 @@ class QueryPromptBuilderTest(unittest.TestCase):
         self.assertIn("foreign_keys: user_id -> public.users(id)", prompt_input["metadata"])
         self.assertIn("public.orders(user_id) -> public.users(id)", prompt_input["metadata"])
         self.assertEqual(prompt_input["question"], "List recent orders")
+        self.assertIn("Current user question:\nList recent orders", prompt_input["prompt_text"])
+        self.assertNotIn("Session context:", prompt_input["prompt_text"])
+
+    def test_build_includes_previous_context_when_present(self):
+        builder = QueryPromptBuilder()
+
+        prompt_input = builder.build(
+            metadata_json={
+                "database_type": "postgresql",
+                "database_name": "analytics",
+                "schemas": [],
+                "relationships": [],
+            },
+            question="Now only enterprise customers",
+            last_user_question="Show orders by month",
+            last_sql_query="SELECT date_trunc('month', created_at) FROM orders",
+        )
+
+        self.assertIn("Session context:", prompt_input["prompt_text"])
+        self.assertIn("last_user_question: Show orders by month", prompt_input["prompt_text"])
+        self.assertIn(
+            "last_sql_query: SELECT date_trunc('month', created_at) FROM orders",
+            prompt_input["prompt_text"],
+        )
+        self.assertIn(
+            "Current user question:\nNow only enterprise customers",
+            prompt_input["prompt_text"],
+        )
 
 
 class ReadOnlySQLValidatorTest(unittest.TestCase):
@@ -262,6 +289,7 @@ class QueryServiceTest(unittest.TestCase):
         self.assertEqual(result.token_usage.total_tokens, 120)
         self.assertEqual(result.token_usage.cached_input_tokens, 12)
         self.assertEqual(llm_client.calls[0]["question"], "List users")
+        self.assertNotIn("Session context:", llm_client.calls[0]["prompt_text"])
         self.assertEqual(validator.inputs, ["SELECT id FROM users LIMIT 10"])
         self.assertEqual(executor.inputs, ["SELECT id FROM users LIMIT 10"])
         self.assertEqual(service.message_repository.created[0].role, "user")
@@ -271,7 +299,10 @@ class QueryServiceTest(unittest.TestCase):
             service.prompt_record_repository.created[0].assistant_message_id,
             service.message_repository.created[1].id,
         )
-        self.assertIn("Database metadata:", service.prompt_record_repository.created[0].user_prompt)
+        self.assertEqual(
+            service.prompt_record_repository.created[0].system_prompt,
+            DEFAULT_SYSTEM_PROMPT,
+        )
         self.assertEqual(
             service.query_record_repository.created[0].assistant_message_id,
             service.message_repository.created[1].id,
@@ -281,6 +312,73 @@ class QueryServiceTest(unittest.TestCase):
             service.message_repository.created[1].id,
         )
         self.assertEqual(service.token_usage_repository.created[0].provider, "groq")
+
+    def test_run_query_includes_previous_context_in_prompt(self):
+        llm_client = FakeLLMClient(
+            sql_query="SELECT count(*) FROM orders WHERE segment = 'enterprise'",
+            summary="Counts enterprise orders.",
+        )
+        service = QueryService(
+            db=FakeDB(),
+            connection_repository=FakeConnectionRepository(
+                SimpleNamespace(id=10, database_type="postgresql", database_name="app_db")
+            ),
+            metadata_repository=FakeMetadataRepository(
+                SimpleNamespace(
+                    status="completed",
+                    metadata_json={
+                        "database_type": "postgresql",
+                        "database_name": "app_db",
+                        "schemas": [],
+                        "relationships": [],
+                    },
+                )
+            ),
+            session_repository=FakeSessionRepository(SimpleNamespace(id=5, workspace_id=1)),
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            message_repository=FakeMessageRepository(
+                last_user_query=SimpleNamespace(content="Show orders by month")
+            ),
+            prompt_record_repository=FakePromptRecordRepository(),
+            query_record_repository=FakeQueryRecordRepository(
+                last_completed=SimpleNamespace(
+                    sql_query="SELECT date_trunc('month', created_at) FROM orders"
+                )
+            ),
+            token_usage_repository=FakeTokenUsageRepository(),
+            prompt_builder=QueryPromptBuilder(),
+            llm_client=llm_client,
+            sql_validator=FakeValidator("SELECT count(*) FROM orders WHERE segment = 'enterprise'"),
+            query_executor=FakeExecutor(
+                QueryResponse(
+                    sql_query="SELECT count(*) FROM orders WHERE segment = 'enterprise'",
+                    summary="",
+                    columns=["count"],
+                    rows=[{"count": 10}],
+                    row_count=1,
+                    execution_time_ms=9,
+                    truncated=False,
+                    token_usage=QueryTokenUsage(
+                        total_tokens=0,
+                        input_tokens=0,
+                        output_tokens=0,
+                        cached_input_tokens=0,
+                    ),
+                )
+            ),
+        )
+
+        service.run_query("workspace-key", "session-key", "Now only enterprise customers")
+
+        self.assertIn("Session context:", llm_client.calls[0]["prompt_text"])
+        self.assertIn(
+            "last_user_question: Show orders by month",
+            llm_client.calls[0]["prompt_text"],
+        )
+        self.assertIn(
+            "last_sql_query: SELECT date_trunc('month', created_at) FROM orders",
+            llm_client.calls[0]["prompt_text"],
+        )
 
     def test_run_query_requires_connection(self):
         service = self._build_service(connection=None)
@@ -353,12 +451,12 @@ class FakeLLMClient:
         )
         self.calls = []
 
-    def generate_sql(self, system_prompt, user_prompt):
+    def generate_sql(self, system_prompt, prompt_text):
         self.calls.append(
             {
                 "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "question": self._extract_question(user_prompt),
+                "prompt_text": prompt_text,
+                "question": self._extract_question(prompt_text),
             }
         )
         return SimpleNamespace(
@@ -369,11 +467,11 @@ class FakeLLMClient:
             model_name="llama-3.3-70b-versatile",
         )
 
-    def _extract_question(self, user_prompt):
-        marker = "User question:\n"
-        if marker not in user_prompt:
+    def _extract_question(self, prompt_text):
+        marker = "Current user question:\n"
+        if marker not in prompt_text:
             return ""
-        return user_prompt.split(marker, 1)[1].split("\n\n", 1)[0]
+        return prompt_text.split(marker, 1)[1].split("\n\n", 1)[0]
 
 
 class FakeValidator:
@@ -429,9 +527,10 @@ class FakeMetadataRepository:
 
 
 class FakeMessageRepository:
-    def __init__(self):
+    def __init__(self, last_user_query=None):
         self.created = []
         self._next_id = 1
+        self.last_user_query = last_user_query
 
     def create(self, message):
         if getattr(message, "id", None) is None:
@@ -440,14 +539,21 @@ class FakeMessageRepository:
         self.created.append(message)
         return message
 
+    def get_last_user_query(self, session_id):
+        return self.last_user_query
+
 
 class FakeQueryRecordRepository:
-    def __init__(self):
+    def __init__(self, last_completed=None):
         self.created = []
+        self.last_completed = last_completed
 
     def create(self, query_record):
         self.created.append(query_record)
         return query_record
+
+    def get_last_completed_for_session(self, session_id):
+        return self.last_completed
 
 
 class FakePromptRecordRepository:

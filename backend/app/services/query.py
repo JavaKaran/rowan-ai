@@ -64,13 +64,18 @@ class QueryService:
         workspace_key: str,
         session_key: str,
         question: str,
-        system_prompt: str | None = None,
     ) -> QueryResponse:
         workspace, session, connection, metadata_json = self._resolve_connection_and_metadata(
             workspace_key,
             session_key,
         )
-        prompt_input = self.prompt_builder.build(system_prompt, metadata_json, question)
+        previous_context = self._load_previous_context(session.id)
+        prompt_input = self.prompt_builder.build(
+            metadata_json=metadata_json,
+            question=question,
+            last_user_question=previous_context["last_user_question"],
+            last_sql_query=previous_context["last_sql_query"],
+        )
 
         logger.info(
             "query.generation_started",
@@ -81,7 +86,7 @@ class QueryService:
         )
         generation_result = self.llm_client.generate_sql(
             prompt_input["system_prompt"],
-            prompt_input["user_prompt"],
+            prompt_input["prompt_text"],
         )
         validated_sql = self.sql_validator.validate(generation_result.sql_query)
         try:
@@ -198,7 +203,6 @@ class QueryService:
             PromptRecord(
                 assistant_message_id=assistant_message.id,
                 system_prompt=prompt_input["system_prompt"],
-                user_prompt=prompt_input["user_prompt"],
                 metadata_text=prompt_input["metadata"],
                 user_question=prompt_input["question"],
             )
@@ -232,3 +236,11 @@ class QueryService:
             )
         )
         self.db.commit()
+
+    def _load_previous_context(self, session_id: int) -> dict[str, str | None]:
+        last_user_message = self.message_repository.get_last_user_query(session_id)
+        last_query_record = self.query_record_repository.get_last_completed_for_session(session_id)
+        return {
+            "last_user_question": last_user_message.content if last_user_message else None,
+            "last_sql_query": last_query_record.sql_query if last_query_record else None,
+        }
