@@ -20,15 +20,12 @@ class SessionRepository:
             self.db.rollback()
             raise SessionAlreadyExists() from exc
 
-    def get_by_key(self, session_key: str, workspace_id: int) -> Session | None:
-        return (
-            self.db.query(Session)
-            .filter(
-                Session.session_key == session_key,
-                Session.workspace_id == workspace_id,
-            )
-            .one_or_none()
-        )
+    def get_by_key(self, session_key: str, workspace_id: int | None = None) -> Session | None:
+        query = self.db.query(Session).filter(Session.session_key == session_key)
+        if workspace_id is not None:
+            query = query.filter(Session.workspace_id == workspace_id)
+
+        return query.one_or_none()
 
     def update(self, session: Session) -> Session:
         self.db.commit()

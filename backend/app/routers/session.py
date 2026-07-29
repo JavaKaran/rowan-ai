@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -29,7 +31,7 @@ def create_session(
 @router.get("/{session_key}", response_model=SessionResponse)
 def get_session(
     session_key: str,
-    workspace_key: str = Depends(get_workspace_key),
+    workspace_key: Annotated[str | None, Header(alias="X-Workspace-Key")] = None,
     service: SessionService = Depends(get_session_service),
 ) -> SessionResponse:
     session = service.get_session_by_key(workspace_key, session_key)

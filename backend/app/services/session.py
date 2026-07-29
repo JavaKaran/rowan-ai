@@ -27,12 +27,16 @@ class SessionService:
 
         return self.repository.create(session)
 
-    def get_session_by_key(self, workspace_key: str, session_key: str) -> Session:
-        workspace = self.workspace_repository.get_by_key(workspace_key)
-        if not workspace:
-            raise WorkspaceNotFound()
+    def get_session_by_key(self, workspace_key: str | None, session_key: str) -> Session:
+        if workspace_key:
+            workspace = self.workspace_repository.get_by_key(workspace_key)
+            if not workspace:
+                raise WorkspaceNotFound()
 
-        session = self.repository.get_by_key(session_key, workspace.id)
+            session = self.repository.get_by_key(session_key, workspace.id)
+        else:
+            session = self.repository.get_by_key(session_key)
+
         if not session:
             raise SessionNotFound()
 
