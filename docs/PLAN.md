@@ -347,7 +347,20 @@ Goal: persist what Section 6 requires — not just the final SQL, but every atte
 
 Checkpoint: for a repaired query, querying the DB after the fact shows all 2-3 attempts with their individual guardrail outcomes, not just the final one.
 
-### Phase 6 — Evaluation Harness
+### Phase 6 — Streaming Responses
+
+Goal: stream query progress to the client instead of blocking on one collective response, so the user can see what's happening in the backend (tool calls, repair attempts, SQL execution) as it happens rather than waiting through the full multi-second pipeline in silence.
+
+Design not finalized yet — to be worked out in more depth later. Rough shape:
+
+- Replace the single blocking `POST /query/` JSON response with a streamed response (e.g. SSE or chunked) that emits incremental events
+- Candidate event types: schema-retrieval tool calls as they happen, generation attempts, guardrail pass/block per attempt, repair triggered, SQL execution started/finished, final result
+- `LangChainQueryAgent`/`QueryRepairLoop` currently call `agent.invoke(...)` (blocking); streaming would need `agent.stream(...)`/`astream(...)` or equivalent event surfacing without breaking the existing typed result shape
+- Needs a decision on transport (SSE vs WebSocket vs chunked JSON lines) and how/whether the final persisted `QueryResponse` shape changes
+
+Checkpoint: TBD once the design is worked out.
+
+### Phase 7 — Evaluation Harness
 
 Goal: make quality measurable instead of anecdotal.
 
