@@ -1,8 +1,10 @@
+import json
 import os
 from typing import Any, Callable
 
 from langchain.agents import create_agent
 from langchain.agents.structured_output import ToolStrategy
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from pydantic import BaseModel
@@ -214,13 +216,33 @@ class LangChainQueryAgent:
         )
 
     def _extract_tool_calls(self, messages: list[Any]) -> list[dict[str, Any]]:
+        results_by_call_id = {
+            message.tool_call_id: self._parse_tool_result(message.content)
+            for message in messages
+            if isinstance(message, ToolMessage)
+        }
+
         tool_calls: list[dict[str, Any]] = []
         for message in messages:
             for call in getattr(message, "tool_calls", None) or []:
                 if call.get("name") == GeneratedSQL.__name__:
                     continue
-                tool_calls.append({"name": call.get("name"), "args": call.get("args")})
+                tool_calls.append(
+                    {
+                        "name": call.get("name"),
+                        "args": call.get("args"),
+                        "result": results_by_call_id.get(call.get("id")),
+                    }
+                )
         return tool_calls
+
+    def _parse_tool_result(self, content: Any) -> Any:
+        if not isinstance(content, str):
+            return content
+        try:
+            return json.loads(content)
+        except (TypeError, ValueError):
+            return content
 
 
 def create_query_agent() -> LangChainQueryAgent:

@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 from app.exceptions import SQLGenerationFailed
 from app.services.query_agent import (
@@ -138,7 +138,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
         self.assertEqual(result.model_name, "llama-3.3-70b-versatile")
         self.assertEqual(
             result.tool_calls,
-            [{"name": "find_relevant_tables", "args": {"question": "show users"}}],
+            [{"name": "find_relevant_tables", "args": {"question": "show users"}, "result": None}],
         )
         self.assertEqual(
             captured["tools"],
@@ -198,9 +198,13 @@ class LangChainQueryAgentTest(unittest.TestCase):
         self.assertEqual(
             result.tool_calls,
             [
-                {"name": "find_relevant_tables", "args": {"question": "show users"}},
-                {"name": "get_columns", "args": {"table_names": ["users"]}},
-                {"name": "get_relationships", "args": {"table_names": ["users", "orders"]}},
+                {"name": "find_relevant_tables", "args": {"question": "show users"}, "result": None},
+                {"name": "get_columns", "args": {"table_names": ["users"]}, "result": None},
+                {
+                    "name": "get_relationships",
+                    "args": {"table_names": ["users", "orders"]},
+                    "result": None,
+                },
             ],
         )
         self.assertEqual(result.token_usage.total_tokens, 85)
@@ -238,8 +242,68 @@ class LangChainQueryAgentTest(unittest.TestCase):
 
         self.assertEqual(
             result.tool_calls,
-            [{"name": "find_relevant_tables", "args": {"question": "show users"}}],
+            [{"name": "find_relevant_tables", "args": {"question": "show users"}, "result": None}],
         )
+
+    def test_generate_sql_includes_tool_result_from_matching_tool_message(self):
+        tool_call_message = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "find_relevant_tables", "args": {"question": "show users"}, "id": "1"}
+            ],
+        )
+        tool_result_message = ToolMessage(
+            content='[{"schema": "public", "table": "users"}]',
+            tool_call_id="1",
+            name="find_relevant_tables",
+        )
+        final_message = AIMessage(content="done")
+        state = {
+            "messages": [tool_call_message, tool_result_message, final_message],
+            "structured_response": GeneratedSQL(sql_query="SELECT id FROM users LIMIT 10", summary="ok"),
+        }
+        agent = LangChainQueryAgent(
+            model_name="m",
+            llm_factory=lambda *args: None,
+            agent_factory=lambda *args, **kwargs: FakeAgent(state),
+        )
+
+        result = agent.generate_sql(question="Show users", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(
+            result.tool_calls,
+            [
+                {
+                    "name": "find_relevant_tables",
+                    "args": {"question": "show users"},
+                    "result": [{"schema": "public", "table": "users"}],
+                }
+            ],
+        )
+
+    def test_generate_sql_falls_back_to_raw_content_when_tool_result_is_not_json(self):
+        tool_call_message = AIMessage(
+            content="",
+            tool_calls=[{"name": "find_relevant_tables", "args": {}, "id": "1"}],
+        )
+        tool_result_message = ToolMessage(
+            content="not valid json",
+            tool_call_id="1",
+            name="find_relevant_tables",
+        )
+        state = {
+            "messages": [tool_call_message, tool_result_message],
+            "structured_response": GeneratedSQL(sql_query="SELECT 1", summary="ok"),
+        }
+        agent = LangChainQueryAgent(
+            model_name="m",
+            llm_factory=lambda *args: None,
+            agent_factory=lambda *args, **kwargs: FakeAgent(state),
+        )
+
+        result = agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(result.tool_calls[0]["result"], "not valid json")
 
     def test_generate_sql_includes_session_context_in_user_message(self):
         state = {

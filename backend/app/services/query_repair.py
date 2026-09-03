@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -17,6 +18,8 @@ class AttemptRecord:
     failure_category: GuardrailFailureCategory | None
     failure_detail: str | None
     token_usage: QueryTokenUsage
+    tool_calls: list[dict[str, Any]]
+    latency_ms: int
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,7 @@ class QueryRepairLoop:
         failure_detail: str | None = None
 
         for attempt_number in range(1, self._max_attempts + 1):
+            started_at = time.monotonic()
             if attempt_number == 1:
                 generation_result = self._query_agent.generate_sql(
                     question=question,
@@ -99,6 +103,7 @@ class QueryRepairLoop:
                     last_user_question=last_user_question,
                     last_sql_query=last_sql_query,
                 )
+            latency_ms = int((time.monotonic() - started_at) * 1000)
 
             guardrail_result = self._after_guardrail.check(
                 generation_result.sql_query,
@@ -117,6 +122,8 @@ class QueryRepairLoop:
                     if guardrail_result.failure
                     else None,
                     token_usage=generation_result.token_usage,
+                    tool_calls=generation_result.tool_calls,
+                    latency_ms=latency_ms,
                 )
             )
 

@@ -57,7 +57,7 @@ class FakeQueryAgent:
         return self.repair_results.pop(0)
 
 
-def make_generation_result(sql_query, total_tokens=10):
+def make_generation_result(sql_query, total_tokens=10, tool_calls=None):
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -71,7 +71,7 @@ def make_generation_result(sql_query, total_tokens=10):
         ),
         provider="groq",
         model_name="test-model",
-        tool_calls=[],
+        tool_calls=tool_calls if tool_calls is not None else [],
     )
 
 
@@ -164,6 +164,43 @@ class QueryRepairLoopTest(unittest.TestCase):
         self.assertFalse(outcome.success)
         self.assertEqual(outcome.attempt_count, 2)
         self.assertEqual(len(agent.repair_calls), 1)
+
+    def test_carries_tool_calls_through_to_attempt_records(self):
+        agent = FakeQueryAgent(
+            generate_sql_result=make_generation_result(
+                "SELECT id FROM users",
+                tool_calls=[{"name": "find_relevant_tables", "args": {}, "result": None}],
+            ),
+            repair_results=[
+                make_generation_result(
+                    "SELECT id FROM users LIMIT 10",
+                    tool_calls=[{"name": "get_columns", "args": {}, "result": None}],
+                ),
+            ],
+        )
+        loop = QueryRepairLoop(query_agent=agent, after_guardrail=self.after_guardrail)
+
+        outcome = loop.run(question="List users", metadata_json=METADATA)
+
+        self.assertEqual(
+            outcome.attempts[0].tool_calls,
+            [{"name": "find_relevant_tables", "args": {}, "result": None}],
+        )
+        self.assertEqual(
+            outcome.attempts[1].tool_calls,
+            [{"name": "get_columns", "args": {}, "result": None}],
+        )
+
+    def test_records_non_negative_latency_per_attempt(self):
+        agent = FakeQueryAgent(
+            generate_sql_result=make_generation_result("SELECT id FROM users LIMIT 10")
+        )
+        loop = QueryRepairLoop(query_agent=agent, after_guardrail=self.after_guardrail)
+
+        outcome = loop.run(question="List users", metadata_json=METADATA)
+
+        self.assertIsInstance(outcome.attempts[0].latency_ms, int)
+        self.assertGreaterEqual(outcome.attempts[0].latency_ms, 0)
 
 
 if __name__ == "__main__":

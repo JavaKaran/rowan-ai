@@ -14,6 +14,13 @@ class QueryTokenUsage(BaseModel):
     cached_input_tokens: int
 
 
+class QueryToolCallInfo(BaseModel):
+    attempt_number: int
+    name: str | None
+    args: dict[str, Any] | None
+    result: Any | None = None
+
+
 class QueryResponse(BaseModel):
     sql_query: str
     summary: str
@@ -23,3 +30,6 @@ class QueryResponse(BaseModel):
     execution_time_ms: int
     truncated: bool
     token_usage: QueryTokenUsage
+    attempt_count: int = 1
+    repaired: bool = False
+    tool_calls: list[QueryToolCallInfo] = Field(default_factory=list)

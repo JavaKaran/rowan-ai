@@ -42,6 +42,9 @@ class QueryRouterTest(unittest.TestCase):
                     "output_tokens": 12,
                     "cached_input_tokens": 4,
                 },
+                "attempt_count": 1,
+                "repaired": False,
+                "tool_calls": [],
             },
         )
 

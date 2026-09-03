@@ -8,6 +8,7 @@ from app.repositories import (
     DatabaseMetadataRepository,
     MessageRepository,
     PromptRecordRepository,
+    QueryAttemptRepository,
     QueryRecordRepository,
     SessionRepository,
     TokenUsageRepository,
@@ -36,6 +37,7 @@ def get_query_service(db: Session = Depends(get_db)) -> QueryService:
         prompt_record_repository=PromptRecordRepository(db),
         query_record_repository=QueryRecordRepository(db),
         token_usage_repository=TokenUsageRepository(db),
+        query_attempt_repository=QueryAttemptRepository(db),
         prompt_builder=QueryPromptBuilder(),
         before_guardrail=BeforeGuardrail(),
         repair_loop=QueryRepairLoop(

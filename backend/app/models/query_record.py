@@ -1,4 +1,4 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -6,6 +6,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .base import Base, TimestampMixin
 from .database_connection import DatabaseConnection
 from .message import Message
+
+if TYPE_CHECKING:
+    from .query_attempt import QueryAttempt
 
 
 class QueryRecord(Base, TimestampMixin):
@@ -34,3 +37,7 @@ class QueryRecord(Base, TimestampMixin):
 
     assistant_message: Mapped[Message] = relationship(back_populates="query_record")
     database_connection: Mapped[DatabaseConnection] = relationship()
+    attempts: Mapped[list["QueryAttempt"]] = relationship(
+        back_populates="query_record",
+        order_by="QueryAttempt.attempt_number",
+    )

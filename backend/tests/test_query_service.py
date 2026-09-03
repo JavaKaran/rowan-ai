@@ -351,6 +351,13 @@ class QueryServiceTest(unittest.TestCase):
                     output_tokens=30,
                     cached_input_tokens=12,
                 ),
+                tool_calls=[
+                    {
+                        "name": "find_relevant_tables",
+                        "args": {"question": "List users"},
+                        "result": [{"schema": "public", "table": "users"}],
+                    }
+                ],
             )
         )
         before_guardrail = FakeBeforeGuardrail()
@@ -393,6 +400,7 @@ class QueryServiceTest(unittest.TestCase):
             prompt_record_repository=FakePromptRecordRepository(),
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
+            query_attempt_repository=FakeQueryAttemptRepository(),
             prompt_builder=prompt_builder,
             before_guardrail=before_guardrail,
             repair_loop=repair_loop,
@@ -433,6 +441,36 @@ class QueryServiceTest(unittest.TestCase):
         )
         self.assertEqual(service.token_usage_repository.created[0].provider, "groq")
 
+        self.assertEqual(result.attempt_count, 1)
+        self.assertFalse(result.repaired)
+        self.assertEqual(len(result.tool_calls), 1)
+        self.assertEqual(result.tool_calls[0].attempt_number, 1)
+        self.assertEqual(result.tool_calls[0].name, "find_relevant_tables")
+        self.assertEqual(result.tool_calls[0].args, {"question": "List users"})
+        self.assertEqual(result.tool_calls[0].result, [{"schema": "public", "table": "users"}])
+
+        self.assertEqual(len(service.query_attempt_repository.created), 1)
+        persisted_attempt = service.query_attempt_repository.created[0]
+        self.assertEqual(
+            persisted_attempt.query_record_id,
+            service.query_record_repository.created[0].id,
+        )
+        self.assertEqual(persisted_attempt.attempt_number, 1)
+        self.assertEqual(persisted_attempt.sql_query, "SELECT id FROM users LIMIT 10")
+        self.assertTrue(persisted_attempt.passed)
+        self.assertIsNone(persisted_attempt.failure_category)
+        self.assertEqual(
+            persisted_attempt.tool_calls,
+            [
+                {
+                    "name": "find_relevant_tables",
+                    "args": {"question": "List users"},
+                    "result": [{"schema": "public", "table": "users"}],
+                }
+            ],
+        )
+        self.assertEqual(persisted_attempt.total_tokens, 120)
+
     def test_run_query_includes_previous_context_in_prompt(self):
         repair_loop = FakeRepairLoop(
             make_outcome(
@@ -468,6 +506,7 @@ class QueryServiceTest(unittest.TestCase):
                 )
             ),
             token_usage_repository=FakeTokenUsageRepository(),
+            query_attempt_repository=FakeQueryAttemptRepository(),
             prompt_builder=QueryPromptBuilder(),
             before_guardrail=FakeBeforeGuardrail(),
             repair_loop=repair_loop,
@@ -542,6 +581,7 @@ class QueryServiceTest(unittest.TestCase):
             prompt_record_repository=FakePromptRecordRepository(),
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
+            query_attempt_repository=FakeQueryAttemptRepository(),
             prompt_builder=QueryPromptBuilder(),
             before_guardrail=before_guardrail,
             repair_loop=repair_loop,
@@ -587,6 +627,8 @@ class QueryServiceTest(unittest.TestCase):
                     token_usage=QueryTokenUsage(
                         total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
                     ),
+                    tool_calls=[],
+                    latency_ms=5,
                 ),
                 AttemptRecord(
                     attempt_number=2,
@@ -597,6 +639,8 @@ class QueryServiceTest(unittest.TestCase):
                     token_usage=QueryTokenUsage(
                         total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
                     ),
+                    tool_calls=[],
+                    latency_ms=5,
                 ),
                 AttemptRecord(
                     attempt_number=3,
@@ -607,6 +651,8 @@ class QueryServiceTest(unittest.TestCase):
                     token_usage=QueryTokenUsage(
                         total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
                     ),
+                    tool_calls=[],
+                    latency_ms=5,
                 ),
             ],
         )
@@ -646,6 +692,7 @@ class QueryServiceTest(unittest.TestCase):
             prompt_record_repository=FakePromptRecordRepository(),
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
+            query_attempt_repository=FakeQueryAttemptRepository(),
             prompt_builder=QueryPromptBuilder(),
             before_guardrail=FakeBeforeGuardrail(),
             repair_loop=FakeRepairLoop(failed_outcome),
@@ -656,6 +703,20 @@ class QueryServiceTest(unittest.TestCase):
             service.run_query("workspace-key", "session-key", "List users")
 
         self.assertEqual(executor.inputs, [])
+        self.assertEqual(
+            service.query_record_repository.created[0].status,
+            "generation_failed",
+        )
+        self.assertEqual(
+            service.query_record_repository.created[0].error_message,
+            "Queries must include a LIMIT unless they are aggregate-only reads.",
+        )
+        self.assertEqual(len(service.query_attempt_repository.created), 3)
+        self.assertEqual(
+            [attempt.attempt_number for attempt in service.query_attempt_repository.created],
+            [1, 2, 3],
+        )
+        self.assertFalse(service.query_attempt_repository.created[0].passed)
 
     def _build_service(self, connection="sentinel", metadata="sentinel"):
         if connection == "sentinel":
@@ -681,6 +742,7 @@ class QueryServiceTest(unittest.TestCase):
             prompt_record_repository=FakePromptRecordRepository(),
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
+            query_attempt_repository=FakeQueryAttemptRepository(),
             prompt_builder=QueryPromptBuilder(),
             before_guardrail=FakeBeforeGuardrail(),
             repair_loop=FakeRepairLoop(make_outcome(sql_query="SELECT 1")),
@@ -704,7 +766,14 @@ class QueryServiceTest(unittest.TestCase):
         )
 
 
-def make_outcome(sql_query, summary="Summary", token_usage=None, provider="groq", model_name="test-model"):
+def make_outcome(
+    sql_query,
+    summary="Summary",
+    token_usage=None,
+    provider="groq",
+    model_name="test-model",
+    tool_calls=None,
+):
     token_usage = token_usage or QueryTokenUsage(
         total_tokens=0,
         input_tokens=0,
@@ -729,6 +798,8 @@ def make_outcome(sql_query, summary="Summary", token_usage=None, provider="groq"
                 failure_category=None,
                 failure_detail=None,
                 token_usage=token_usage,
+                tool_calls=tool_calls if tool_calls is not None else [],
+                latency_ms=5,
             )
         ],
     )
@@ -826,8 +897,12 @@ class FakeQueryRecordRepository:
     def __init__(self, last_completed=None):
         self.created = []
         self.last_completed = last_completed
+        self._next_id = 1
 
     def create(self, query_record):
+        if getattr(query_record, "id", None) is None:
+            query_record.id = self._next_id
+            self._next_id += 1
         self.created.append(query_record)
         return query_record
 
@@ -851,6 +926,19 @@ class FakeTokenUsageRepository:
     def create(self, token_usage):
         self.created.append(token_usage)
         return token_usage
+
+
+class FakeQueryAttemptRepository:
+    def __init__(self):
+        self.created = []
+        self._next_id = 1
+
+    def create(self, query_attempt):
+        if getattr(query_attempt, "id", None) is None:
+            query_attempt.id = self._next_id
+            self._next_id += 1
+        self.created.append(query_attempt)
+        return query_attempt
 
 
 class FakeTransaction:

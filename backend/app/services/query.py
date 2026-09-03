@@ -9,23 +9,31 @@ from app.exceptions import (
     SessionNotFound,
     WorkspaceNotFound,
 )
-from app.models import DatabaseConnection, Message, PromptRecord, QueryRecord, TokenUsage
+from app.models import (
+    DatabaseConnection,
+    Message,
+    PromptRecord,
+    QueryAttempt,
+    QueryRecord,
+    TokenUsage,
+)
 from app.repositories import (
     DatabaseConnectionRepository,
     DatabaseMetadataRepository,
     MessageRepository,
     PromptRecordRepository,
+    QueryAttemptRepository,
     QueryRecordRepository,
     SessionRepository,
     TokenUsageRepository,
     WorkspaceRepository,
 )
-from app.schemas import QueryResponse
+from app.schemas import QueryResponse, QueryToolCallInfo
 from app.services.query_agent import AGENT_SYSTEM_PROMPT
 from app.services.query_executor import SQLQueryExecutor
 from app.services.query_guardrails import BeforeGuardrail
 from app.services.query_prompt_builder import QueryPromptBuilder
-from app.services.query_repair import QueryRepairLoop
+from app.services.query_repair import AttemptRecord, QueryRepairLoop
 
 logger = get_logger(__name__)
 
@@ -42,6 +50,7 @@ class QueryService:
         prompt_record_repository: PromptRecordRepository,
         query_record_repository: QueryRecordRepository,
         token_usage_repository: TokenUsageRepository,
+        query_attempt_repository: QueryAttemptRepository,
         prompt_builder: QueryPromptBuilder,
         before_guardrail: BeforeGuardrail,
         repair_loop: QueryRepairLoop,
@@ -56,6 +65,7 @@ class QueryService:
         self.prompt_record_repository = prompt_record_repository
         self.query_record_repository = query_record_repository
         self.token_usage_repository = token_usage_repository
+        self.query_attempt_repository = query_attempt_repository
         self.prompt_builder = prompt_builder
         self.before_guardrail = before_guardrail
         self.repair_loop = repair_loop
@@ -105,6 +115,21 @@ class QueryService:
                 failure_category=last_attempt.failure_category if last_attempt else None,
                 failure_detail=last_attempt.failure_detail if last_attempt else None,
             )
+            self._persist_query_turn(
+                workspace_id=workspace.id,
+                session_id=session.id,
+                connection=connection,
+                question=validated_question,
+                prompt_input=prompt_input,
+                sql_query=last_attempt.sql_query if last_attempt else "",
+                summary="",
+                token_usage=outcome.total_token_usage,
+                provider=outcome.generation_result.provider if outcome.generation_result else "unknown",
+                model_name=outcome.generation_result.model_name if outcome.generation_result else "unknown",
+                query_status="generation_failed",
+                query_error_message=last_attempt.failure_detail if last_attempt else "SQL generation failed.",
+                attempts=outcome.attempts,
+            )
             raise SQLGenerationFailed(
                 last_attempt.failure_detail if last_attempt else "SQL generation failed."
             )
@@ -134,10 +159,23 @@ class QueryService:
                 model_name=generation_result.model_name,
                 query_status="failed",
                 query_error_message=str(exc),
+                attempts=outcome.attempts,
             )
             raise
         result.summary = generation_result.summary
         result.token_usage = outcome.total_token_usage
+        result.attempt_count = outcome.attempt_count
+        result.repaired = outcome.repaired
+        result.tool_calls = [
+            QueryToolCallInfo(
+                attempt_number=attempt.attempt_number,
+                name=call.get("name"),
+                args=call.get("args"),
+                result=call.get("result"),
+            )
+            for attempt in outcome.attempts
+            for call in attempt.tool_calls
+        ]
         self._persist_query_turn(
             workspace_id=workspace.id,
             session_id=session.id,
@@ -151,6 +189,7 @@ class QueryService:
             model_name=generation_result.model_name,
             query_status="completed",
             query_error_message=None,
+            attempts=outcome.attempts,
             result=result,
         )
 
@@ -206,6 +245,7 @@ class QueryService:
         model_name: str,
         query_status: str,
         query_error_message: str | None,
+        attempts: list[AttemptRecord],
         result: QueryResponse | None = None,
     ) -> None:
         self.message_repository.create(
@@ -236,7 +276,7 @@ class QueryService:
                 user_question=prompt_input["question"],
             )
         )
-        self.query_record_repository.create(
+        query_record = self.query_record_repository.create(
             QueryRecord(
                 assistant_message_id=assistant_message.id,
                 database_connection_id=connection.id,
@@ -250,6 +290,25 @@ class QueryService:
                 truncated=result.truncated if result else False,
             )
         )
+        for attempt in attempts:
+            self.query_attempt_repository.create(
+                QueryAttempt(
+                    query_record_id=query_record.id,
+                    attempt_number=attempt.attempt_number,
+                    sql_query=attempt.sql_query,
+                    passed=attempt.passed,
+                    failure_category=attempt.failure_category.value
+                    if attempt.failure_category
+                    else None,
+                    failure_detail=attempt.failure_detail,
+                    tool_calls=attempt.tool_calls,
+                    latency_ms=attempt.latency_ms,
+                    total_tokens=attempt.token_usage.total_tokens,
+                    input_tokens=attempt.token_usage.input_tokens,
+                    output_tokens=attempt.token_usage.output_tokens,
+                    cached_input_tokens=attempt.token_usage.cached_input_tokens,
+                )
+            )
         self.token_usage_repository.create(
             TokenUsage(
                 message_id=assistant_message.id,
