@@ -1,0 +1,1 @@
+Refer @docs/ARCHITECTURE.md @docs/IMPLEMENTATION.md @docs/PLAN.md for the project.

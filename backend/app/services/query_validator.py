@@ -2,7 +2,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from app.exceptions import UnsafeSQLQuery
+from app.exceptions import GuardrailFailureCategory, UnsafeSQLQuery
 
 
 class ReadOnlySQLValidator:
@@ -78,16 +78,21 @@ class ReadOnlySQLValidator:
     def validate_user_request(self, question: str) -> str:
         normalized = question.strip()
         if not normalized:
-            raise UnsafeSQLQuery("Query request is empty.")
+            raise UnsafeSQLQuery(
+                "Query request is empty.",
+                category=GuardrailFailureCategory.EMPTY_REQUEST,
+            )
 
         if self._matches_any(self._prompt_injection_patterns, normalized):
             raise UnsafeSQLQuery(
-                "This assistant only supports safe read-only SQL requests and cannot follow attempts to bypass safety rules."
+                "This assistant only supports safe read-only SQL requests and cannot follow attempts to bypass safety rules.",
+                category=GuardrailFailureCategory.PROMPT_INJECTION,
             )
 
         if self._matches_any(self._write_intent_patterns, normalized):
             raise UnsafeSQLQuery(
-                "This assistant only supports read-only database questions and cannot help modify data or schema."
+                "This assistant only supports read-only database questions and cannot help modify data or schema.",
+                category=GuardrailFailureCategory.WRITE_INTENT,
             )
 
         return normalized
@@ -99,43 +104,84 @@ class ReadOnlySQLValidator:
     ) -> str:
         normalized = sql_text.strip()
         if not normalized:
-            raise UnsafeSQLQuery("Generated SQL query is empty.")
+            raise UnsafeSQLQuery(
+                "Generated SQL query is empty.",
+                category=GuardrailFailureCategory.EMPTY_SQL,
+            )
 
         if any(pattern in normalized for pattern in self._comment_patterns):
-            raise UnsafeSQLQuery("SQL comments are not allowed.")
+            raise UnsafeSQLQuery(
+                "SQL comments are not allowed.",
+                category=GuardrailFailureCategory.SQL_COMMENTS,
+            )
 
         trimmed = normalized[:-1].strip() if normalized.endswith(";") else normalized
         if ";" in trimmed:
-            raise UnsafeSQLQuery("Multiple SQL statements are not allowed.")
+            raise UnsafeSQLQuery(
+                "Multiple SQL statements are not allowed.",
+                category=GuardrailFailureCategory.MULTIPLE_STATEMENTS,
+            )
 
         if self._non_select_statements.search(trimmed):
-            raise UnsafeSQLQuery("Only read-only SELECT queries are allowed.")
+            raise UnsafeSQLQuery(
+                "Only read-only SELECT queries are allowed.",
+                category=GuardrailFailureCategory.NON_SELECT_STATEMENT,
+            )
 
         if self._disallowed_keywords.search(trimmed):
-            raise UnsafeSQLQuery("Only read-only SQL queries are allowed.")
+            raise UnsafeSQLQuery(
+                "Only read-only SQL queries are allowed.",
+                category=GuardrailFailureCategory.DISALLOWED_KEYWORD,
+            )
 
         if any(pattern.search(trimmed) for pattern in self._dangerous_select_patterns):
-            raise UnsafeSQLQuery("This SQL pattern is not allowed for read-only queries.")
+            raise UnsafeSQLQuery(
+                "This SQL pattern is not allowed for read-only queries.",
+                category=GuardrailFailureCategory.DANGEROUS_PATTERN,
+            )
 
         if self._writable_cte_pattern.search(trimmed):
-            raise UnsafeSQLQuery("Writable CTE statements are not allowed.")
+            raise UnsafeSQLQuery(
+                "Writable CTE statements are not allowed.",
+                category=GuardrailFailureCategory.WRITABLE_CTE,
+            )
 
         if not re.match(r"^(select|with)\b", trimmed, re.IGNORECASE):
-            raise UnsafeSQLQuery("Only SELECT queries are allowed.")
+            raise UnsafeSQLQuery(
+                "Only SELECT queries are allowed.",
+                category=GuardrailFailureCategory.NOT_SELECT,
+            )
 
         if self._contains_sensitive_columns(trimmed):
-            raise UnsafeSQLQuery("Queries that access sensitive columns are not allowed.")
+            raise UnsafeSQLQuery(
+                "Queries that access sensitive columns are not allowed.",
+                category=GuardrailFailureCategory.SENSITIVE_COLUMN,
+            )
 
         if metadata_json:
             self._validate_metadata_usage(trimmed, metadata_json)
 
         if self._requires_limit(trimmed):
-            raise UnsafeSQLQuery("Queries must include a LIMIT unless they are aggregate-only reads.")
+            raise UnsafeSQLQuery(
+                "Queries must include a LIMIT unless they are aggregate-only reads.",
+                category=GuardrailFailureCategory.MISSING_LIMIT,
+            )
 
         if re.search(r"\bselect\s+\*", trimmed, re.IGNORECASE):
-            raise UnsafeSQLQuery("SELECT * is not allowed. Query only the columns you need.")
+            raise UnsafeSQLQuery(
+                "SELECT * is not allowed. Query only the columns you need.",
+                category=GuardrailFailureCategory.SELECT_STAR,
+            )
 
         return trimmed
+
+    # Standard SQL introspection views, present in effectively every
+    # relational database. Exposing table/column names for the connected
+    # database is not a security concern, so meta-questions about the
+    # user's own schema are allowed even though these tables are never
+    # part of the discovered application metadata.
+    _introspection_schemas = {"information_schema"}
+    _blocked_schemas = {"pg_catalog", "pg_toast", "mysql", "sys", "performance_schema"}
 
     def _validate_metadata_usage(
         self,
@@ -145,15 +191,23 @@ class ReadOnlySQLValidator:
         allowed_tables = self._build_allowed_table_names(metadata_json)
         referenced_tables = self._extract_table_references(sql_text)
 
-        unknown_tables = sorted(table for table in referenced_tables if table not in allowed_tables)
+        unknown_tables = sorted(
+            table
+            for table in referenced_tables
+            if table not in allowed_tables
+            and table.split(".", 1)[0] not in self._introspection_schemas
+        )
         if unknown_tables:
             raise UnsafeSQLQuery(
-                "Generated SQL references tables that are not present in the discovered database metadata."
+                "Generated SQL references tables that are not present in the discovered database metadata.",
+                category=GuardrailFailureCategory.UNKNOWN_TABLE,
             )
 
-        blocked_schemas = {"information_schema", "pg_catalog", "pg_toast", "mysql", "sys", "performance_schema"}
-        if any(table.split(".", 1)[0] in blocked_schemas for table in referenced_tables if "." in table):
-            raise UnsafeSQLQuery("System schemas are not available for querying.")
+        if any(table.split(".", 1)[0] in self._blocked_schemas for table in referenced_tables if "." in table):
+            raise UnsafeSQLQuery(
+                "System schemas are not available for querying.",
+                category=GuardrailFailureCategory.SYSTEM_SCHEMA,
+            )
 
     def _build_allowed_table_names(self, metadata_json: dict[str, Any]) -> set[str]:
         allowed_tables: set[str] = set()

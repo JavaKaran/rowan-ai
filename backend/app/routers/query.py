@@ -16,10 +16,11 @@ from app.repositories import (
 from app.schemas import QueryRequest, QueryResponse
 from app.services.query import QueryService
 from app.services.database_connection_runtime import DatabaseConnectionRuntime
+from app.services.query_agent import create_query_agent
 from app.services.query_executor import SQLQueryExecutor
-from app.services.query_llm import create_query_llm_client
+from app.services.query_guardrails import AfterGuardrail, BeforeGuardrail
 from app.services.query_prompt_builder import QueryPromptBuilder
-from app.services.query_validator import ReadOnlySQLValidator
+from app.services.query_repair import QueryRepairLoop
 
 router = APIRouter(prefix="/query", tags=["query"])
 
@@ -36,8 +37,11 @@ def get_query_service(db: Session = Depends(get_db)) -> QueryService:
         query_record_repository=QueryRecordRepository(db),
         token_usage_repository=TokenUsageRepository(db),
         prompt_builder=QueryPromptBuilder(),
-        llm_client=create_query_llm_client(),
-        sql_validator=ReadOnlySQLValidator(),
+        before_guardrail=BeforeGuardrail(),
+        repair_loop=QueryRepairLoop(
+            query_agent=create_query_agent(),
+            after_guardrail=AfterGuardrail(),
+        ),
         query_executor=SQLQueryExecutor(connection_runtime=DatabaseConnectionRuntime()),
     )
 

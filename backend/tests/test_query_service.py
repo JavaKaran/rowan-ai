@@ -10,13 +10,17 @@ from app.core.database_connections import encrypt_password
 from app.exceptions import (
     DatabaseConnectionNotFound,
     DatabaseMetadataNotReady,
+    GuardrailFailureCategory,
     SQLExecutionFailed,
+    SQLGenerationFailed,
     UnsafeSQLQuery,
 )
 from app.services.query import QueryService
 from app.schemas import QueryResponse, QueryTokenUsage
+from app.services.query_agent import AGENT_SYSTEM_PROMPT
 from app.services.query_executor import SQLQueryExecutor
 from app.services.query_prompt_builder import DEFAULT_SYSTEM_PROMPT, QueryPromptBuilder
+from app.services.query_repair import AttemptRecord, GenerationOutcome
 from app.services.query_validator import ReadOnlySQLValidator
 
 
@@ -220,6 +224,48 @@ class ReadOnlySQLValidatorTest(unittest.TestCase):
                 },
             )
 
+    def test_accepts_information_schema_tables_query_for_meta_questions(self):
+        validated = self.validator.validate(
+            "SELECT table_name FROM information_schema.tables LIMIT 50",
+            metadata_json={
+                "schemas": [
+                    {
+                        "name": "public",
+                        "tables": [{"name": "users"}],
+                    }
+                ]
+            },
+        )
+        self.assertEqual(validated, "SELECT table_name FROM information_schema.tables LIMIT 50")
+
+    def test_accepts_information_schema_columns_query_for_meta_questions(self):
+        validated = self.validator.validate(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'users' LIMIT 50",
+            metadata_json={
+                "schemas": [
+                    {
+                        "name": "public",
+                        "tables": [{"name": "users"}],
+                    }
+                ]
+            },
+        )
+        self.assertIn("information_schema.columns", validated)
+
+    def test_rejects_pg_catalog_even_though_information_schema_is_allowed(self):
+        with self.assertRaises(UnsafeSQLQuery):
+            self.validator.validate(
+                "SELECT relname FROM pg_catalog.pg_class LIMIT 10",
+                metadata_json={
+                    "schemas": [
+                        {
+                            "name": "public",
+                            "tables": [{"name": "users"}],
+                        }
+                    ]
+                },
+            )
+
     def test_accepts_aggregate_without_limit(self):
         validated = self.validator.validate(
             "SELECT COUNT(*) FROM users",
@@ -295,17 +341,19 @@ class SQLAlchemyQueryExecutorTest(unittest.TestCase):
 class QueryServiceTest(unittest.TestCase):
     def test_run_query_happy_path(self):
         prompt_builder = QueryPromptBuilder()
-        llm_client = FakeLLMClient(
-            sql_query="SELECT id FROM users LIMIT 10",
-            summary="Fetches user IDs with a result cap for safe browsing.",
-            token_usage=QueryTokenUsage(
-                total_tokens=120,
-                input_tokens=90,
-                output_tokens=30,
-                cached_input_tokens=12,
-            ),
+        repair_loop = FakeRepairLoop(
+            make_outcome(
+                sql_query="SELECT id FROM users LIMIT 10",
+                summary="Fetches user IDs with a result cap for safe browsing.",
+                token_usage=QueryTokenUsage(
+                    total_tokens=120,
+                    input_tokens=90,
+                    output_tokens=30,
+                    cached_input_tokens=12,
+                ),
+            )
         )
-        validator = FakeValidator("SELECT id FROM users LIMIT 10")
+        before_guardrail = FakeBeforeGuardrail()
         executor = FakeExecutor(
             QueryResponse(
                 sql_query="SELECT id FROM users LIMIT 10",
@@ -346,8 +394,8 @@ class QueryServiceTest(unittest.TestCase):
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
             prompt_builder=prompt_builder,
-            llm_client=llm_client,
-            sql_validator=validator,
+            before_guardrail=before_guardrail,
+            repair_loop=repair_loop,
             query_executor=executor,
         )
 
@@ -360,10 +408,9 @@ class QueryServiceTest(unittest.TestCase):
         )
         self.assertEqual(result.token_usage.total_tokens, 120)
         self.assertEqual(result.token_usage.cached_input_tokens, 12)
-        self.assertEqual(llm_client.calls[0]["question"], "List users")
-        self.assertNotIn("Session context:", llm_client.calls[0]["prompt_text"])
-        self.assertEqual(validator.user_requests, ["List users"])
-        self.assertEqual(validator.inputs, ["SELECT id FROM users LIMIT 10"])
+        self.assertEqual(repair_loop.calls[0]["question"], "List users")
+        self.assertIsNone(repair_loop.calls[0]["last_user_question"])
+        self.assertEqual(before_guardrail.calls, ["List users"])
         self.assertEqual(executor.inputs, ["SELECT id FROM users LIMIT 10"])
         self.assertEqual(service.message_repository.created[0].role, "user")
         self.assertEqual(service.message_repository.created[0].content, "List users")
@@ -374,7 +421,7 @@ class QueryServiceTest(unittest.TestCase):
         )
         self.assertEqual(
             service.prompt_record_repository.created[0].system_prompt,
-            DEFAULT_SYSTEM_PROMPT,
+            AGENT_SYSTEM_PROMPT,
         )
         self.assertEqual(
             service.query_record_repository.created[0].assistant_message_id,
@@ -387,9 +434,11 @@ class QueryServiceTest(unittest.TestCase):
         self.assertEqual(service.token_usage_repository.created[0].provider, "groq")
 
     def test_run_query_includes_previous_context_in_prompt(self):
-        llm_client = FakeLLMClient(
-            sql_query="SELECT count(*) FROM orders WHERE segment = 'enterprise'",
-            summary="Counts enterprise orders.",
+        repair_loop = FakeRepairLoop(
+            make_outcome(
+                sql_query="SELECT count(*) FROM orders WHERE segment = 'enterprise'",
+                summary="Counts enterprise orders.",
+            )
         )
         service = QueryService(
             db=FakeDB(),
@@ -420,8 +469,8 @@ class QueryServiceTest(unittest.TestCase):
             ),
             token_usage_repository=FakeTokenUsageRepository(),
             prompt_builder=QueryPromptBuilder(),
-            llm_client=llm_client,
-            sql_validator=FakeValidator("SELECT count(*) FROM orders WHERE segment = 'enterprise'"),
+            before_guardrail=FakeBeforeGuardrail(),
+            repair_loop=repair_loop,
             query_executor=FakeExecutor(
                 QueryResponse(
                     sql_query="SELECT count(*) FROM orders WHERE segment = 'enterprise'",
@@ -443,14 +492,13 @@ class QueryServiceTest(unittest.TestCase):
 
         service.run_query("workspace-key", "session-key", "Now only enterprise customers")
 
-        self.assertIn("Session context:", llm_client.calls[0]["prompt_text"])
-        self.assertIn(
-            "last_user_question: Show orders by month",
-            llm_client.calls[0]["prompt_text"],
+        self.assertEqual(
+            repair_loop.calls[0]["last_user_question"],
+            "Show orders by month",
         )
-        self.assertIn(
-            "last_sql_query: SELECT date_trunc('month', created_at) FROM orders",
-            llm_client.calls[0]["prompt_text"],
+        self.assertEqual(
+            repair_loop.calls[0]["last_sql_query"],
+            "SELECT date_trunc('month', created_at) FROM orders",
         )
 
     def test_run_query_requires_connection(self):
@@ -466,10 +514,11 @@ class QueryServiceTest(unittest.TestCase):
             service.run_query("workspace-key", "session-key", "List users")
 
     def test_run_query_blocks_unsafe_user_request_before_llm(self):
-        llm_client = FakeLLMClient("SELECT id FROM users LIMIT 10")
-        validator = FakeValidator("SELECT id FROM users LIMIT 10")
-        validator.user_request_error = UnsafeSQLQuery(
-            "This assistant only supports read-only database questions and cannot help modify data or schema."
+        repair_loop = FakeRepairLoop(make_outcome(sql_query="SELECT id FROM users LIMIT 10"))
+        before_guardrail = FakeBeforeGuardrail(
+            error=UnsafeSQLQuery(
+                "This assistant only supports read-only database questions and cannot help modify data or schema."
+            )
         )
         service = QueryService(
             db=FakeDB(),
@@ -494,8 +543,8 @@ class QueryServiceTest(unittest.TestCase):
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
             prompt_builder=QueryPromptBuilder(),
-            llm_client=llm_client,
-            sql_validator=validator,
+            before_guardrail=before_guardrail,
+            repair_loop=repair_loop,
             query_executor=FakeExecutor(
                 QueryResponse(
                     sql_query="SELECT id FROM users LIMIT 10",
@@ -518,8 +567,95 @@ class QueryServiceTest(unittest.TestCase):
         with self.assertRaises(UnsafeSQLQuery):
             service.run_query("workspace-key", "session-key", "Delete users")
 
-        self.assertEqual(validator.user_requests, ["Delete users"])
-        self.assertEqual(llm_client.calls, [])
+        self.assertEqual(before_guardrail.calls, ["Delete users"])
+        self.assertEqual(repair_loop.calls, [])
+
+    def test_run_query_raises_sql_generation_failed_when_repair_loop_exhausted(self):
+        failed_outcome = GenerationOutcome(
+            success=False,
+            sql_query=None,
+            generation_result=SimpleNamespace(
+                summary="n/a", provider="groq", model_name="test-model"
+            ),
+            attempts=[
+                AttemptRecord(
+                    attempt_number=1,
+                    sql_query="SELECT id FROM users",
+                    passed=False,
+                    failure_category=GuardrailFailureCategory.MISSING_LIMIT,
+                    failure_detail="Queries must include a LIMIT unless they are aggregate-only reads.",
+                    token_usage=QueryTokenUsage(
+                        total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
+                    ),
+                ),
+                AttemptRecord(
+                    attempt_number=2,
+                    sql_query="SELECT id FROM users",
+                    passed=False,
+                    failure_category=GuardrailFailureCategory.MISSING_LIMIT,
+                    failure_detail="Queries must include a LIMIT unless they are aggregate-only reads.",
+                    token_usage=QueryTokenUsage(
+                        total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
+                    ),
+                ),
+                AttemptRecord(
+                    attempt_number=3,
+                    sql_query="SELECT id FROM users",
+                    passed=False,
+                    failure_category=GuardrailFailureCategory.MISSING_LIMIT,
+                    failure_detail="Queries must include a LIMIT unless they are aggregate-only reads.",
+                    token_usage=QueryTokenUsage(
+                        total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
+                    ),
+                ),
+            ],
+        )
+        executor = FakeExecutor(
+            QueryResponse(
+                sql_query="unused",
+                summary="",
+                columns=[],
+                rows=[],
+                row_count=0,
+                execution_time_ms=0,
+                truncated=False,
+                token_usage=QueryTokenUsage(
+                    total_tokens=0, input_tokens=0, output_tokens=0, cached_input_tokens=0
+                ),
+            )
+        )
+        service = QueryService(
+            db=FakeDB(),
+            connection_repository=FakeConnectionRepository(
+                SimpleNamespace(id=10, database_type="postgresql", database_name="app_db")
+            ),
+            metadata_repository=FakeMetadataRepository(
+                SimpleNamespace(
+                    status="completed",
+                    metadata_json={
+                        "database_type": "postgresql",
+                        "database_name": "app_db",
+                        "schemas": [],
+                        "relationships": [],
+                    },
+                )
+            ),
+            session_repository=FakeSessionRepository(SimpleNamespace(id=5, workspace_id=1)),
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            message_repository=FakeMessageRepository(),
+            prompt_record_repository=FakePromptRecordRepository(),
+            query_record_repository=FakeQueryRecordRepository(),
+            token_usage_repository=FakeTokenUsageRepository(),
+            prompt_builder=QueryPromptBuilder(),
+            before_guardrail=FakeBeforeGuardrail(),
+            repair_loop=FakeRepairLoop(failed_outcome),
+            query_executor=executor,
+        )
+
+        with self.assertRaises(SQLGenerationFailed):
+            service.run_query("workspace-key", "session-key", "List users")
+
+        self.assertEqual(executor.inputs, [])
 
     def _build_service(self, connection="sentinel", metadata="sentinel"):
         if connection == "sentinel":
@@ -546,8 +682,8 @@ class QueryServiceTest(unittest.TestCase):
             query_record_repository=FakeQueryRecordRepository(),
             token_usage_repository=FakeTokenUsageRepository(),
             prompt_builder=QueryPromptBuilder(),
-            llm_client=FakeLLMClient("SELECT 1"),
-            sql_validator=FakeValidator("SELECT 1"),
+            before_guardrail=FakeBeforeGuardrail(),
+            repair_loop=FakeRepairLoop(make_outcome(sql_query="SELECT 1")),
             query_executor=FakeExecutor(
                 QueryResponse(
                     sql_query="SELECT 1",
@@ -568,57 +704,63 @@ class QueryServiceTest(unittest.TestCase):
         )
 
 
-class FakeLLMClient:
-    def __init__(self, sql_query, summary="Summary", token_usage=None):
-        self.sql_query = sql_query
-        self.summary = summary
-        self.token_usage = token_usage or QueryTokenUsage(
-            total_tokens=0,
-            input_tokens=0,
-            output_tokens=0,
-            cached_input_tokens=0,
-        )
+def make_outcome(sql_query, summary="Summary", token_usage=None, provider="groq", model_name="test-model"):
+    token_usage = token_usage or QueryTokenUsage(
+        total_tokens=0,
+        input_tokens=0,
+        output_tokens=0,
+        cached_input_tokens=0,
+    )
+    return GenerationOutcome(
+        success=True,
+        sql_query=sql_query,
+        generation_result=SimpleNamespace(
+            sql_query=sql_query,
+            summary=summary,
+            token_usage=token_usage,
+            provider=provider,
+            model_name=model_name,
+        ),
+        attempts=[
+            AttemptRecord(
+                attempt_number=1,
+                sql_query=sql_query,
+                passed=True,
+                failure_category=None,
+                failure_detail=None,
+                token_usage=token_usage,
+            )
+        ],
+    )
+
+
+class FakeRepairLoop:
+    def __init__(self, outcome):
+        self.outcome = outcome
         self.calls = []
 
-    def generate_sql(self, system_prompt, prompt_text):
+    def run(self, question, metadata_json, last_user_question=None, last_sql_query=None):
         self.calls.append(
             {
-                "system_prompt": system_prompt,
-                "prompt_text": prompt_text,
-                "question": self._extract_question(prompt_text),
+                "question": question,
+                "metadata_json": metadata_json,
+                "last_user_question": last_user_question,
+                "last_sql_query": last_sql_query,
             }
         )
-        return SimpleNamespace(
-            sql_query=self.sql_query,
-            summary=self.summary,
-            token_usage=self.token_usage,
-            provider="groq",
-            model_name="llama-3.3-70b-versatile",
-        )
-
-    def _extract_question(self, prompt_text):
-        marker = "Current user question:\n"
-        if marker not in prompt_text:
-            return ""
-        return prompt_text.split(marker, 1)[1].split("\n\n", 1)[0]
+        return self.outcome
 
 
-class FakeValidator:
-    def __init__(self, result):
-        self.result = result
-        self.inputs = []
-        self.user_requests = []
-        self.user_request_error = None
+class FakeBeforeGuardrail:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
 
-    def validate_user_request(self, question):
-        self.user_requests.append(question)
-        if self.user_request_error:
-            raise self.user_request_error
+    def check(self, question):
+        self.calls.append(question)
+        if self.error:
+            raise self.error
         return question.strip()
-
-    def validate(self, sql_text, metadata_json=None):
-        self.inputs.append(sql_text)
-        return self.result
 
 
 class FakeExecutor:

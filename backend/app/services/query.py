@@ -5,6 +5,7 @@ from app.exceptions import (
     DatabaseConnectionNotFound,
     DatabaseMetadataNotReady,
     SQLExecutionFailed,
+    SQLGenerationFailed,
     SessionNotFound,
     WorkspaceNotFound,
 )
@@ -20,10 +21,11 @@ from app.repositories import (
     WorkspaceRepository,
 )
 from app.schemas import QueryResponse
+from app.services.query_agent import AGENT_SYSTEM_PROMPT
 from app.services.query_executor import SQLQueryExecutor
-from app.services.query_llm import LangChainGroqQueryLLMClient
+from app.services.query_guardrails import BeforeGuardrail
 from app.services.query_prompt_builder import QueryPromptBuilder
-from app.services.query_validator import ReadOnlySQLValidator
+from app.services.query_repair import QueryRepairLoop
 
 logger = get_logger(__name__)
 
@@ -41,8 +43,8 @@ class QueryService:
         query_record_repository: QueryRecordRepository,
         token_usage_repository: TokenUsageRepository,
         prompt_builder: QueryPromptBuilder,
-        llm_client: LangChainGroqQueryLLMClient,
-        sql_validator: ReadOnlySQLValidator,
+        before_guardrail: BeforeGuardrail,
+        repair_loop: QueryRepairLoop,
         query_executor: SQLQueryExecutor,
     ):
         self.db = db
@@ -55,8 +57,8 @@ class QueryService:
         self.query_record_repository = query_record_repository
         self.token_usage_repository = token_usage_repository
         self.prompt_builder = prompt_builder
-        self.llm_client = llm_client
-        self.sql_validator = sql_validator
+        self.before_guardrail = before_guardrail
+        self.repair_loop = repair_loop
         self.query_executor = query_executor
 
     def run_query(
@@ -69,7 +71,7 @@ class QueryService:
             workspace_key,
             session_key,
         )
-        validated_question = self.sql_validator.validate_user_request(question)
+        validated_question = self.before_guardrail.check(question)
         previous_context = self._load_previous_context(session.id)
         prompt_input = self.prompt_builder.build(
             metadata_json=metadata_json,
@@ -77,6 +79,7 @@ class QueryService:
             last_user_question=previous_context["last_user_question"],
             last_sql_query=previous_context["last_sql_query"],
         )
+        prompt_input["system_prompt"] = AGENT_SYSTEM_PROMPT
 
         logger.info(
             "query.generation_started",
@@ -85,16 +88,38 @@ class QueryService:
             database_type=connection.database_type,
             database_name=connection.database_name,
         )
-        generation_result = self.llm_client.generate_sql(
-            prompt_input["system_prompt"],
-            prompt_input["prompt_text"],
-        )
-        validated_sql = self.sql_validator.validate(
-            generation_result.sql_query,
+        outcome = self.repair_loop.run(
+            question=validated_question,
             metadata_json=metadata_json,
+            last_user_question=previous_context["last_user_question"],
+            last_sql_query=previous_context["last_sql_query"],
         )
+
+        if not outcome.success:
+            last_attempt = outcome.attempts[-1] if outcome.attempts else None
+            logger.warning(
+                "query.generation_failed_after_repair",
+                workspace_key=mask_value(workspace_key),
+                session_key=mask_value(session_key),
+                attempts=outcome.attempt_count,
+                failure_category=last_attempt.failure_category if last_attempt else None,
+                failure_detail=last_attempt.failure_detail if last_attempt else None,
+            )
+            raise SQLGenerationFailed(
+                last_attempt.failure_detail if last_attempt else "SQL generation failed."
+            )
+
+        generation_result = outcome.generation_result
+        logger.info(
+            "query.generation_succeeded",
+            workspace_key=mask_value(workspace_key),
+            session_key=mask_value(session_key),
+            attempts=outcome.attempt_count,
+            repaired=outcome.repaired,
+        )
+
         try:
-            result = self.query_executor.execute(connection, validated_sql)
+            result = self.query_executor.execute(connection, outcome.sql_query)
         except SQLExecutionFailed as exc:
             self._persist_query_turn(
                 workspace_id=workspace.id,
@@ -102,9 +127,9 @@ class QueryService:
                 connection=connection,
                 question=validated_question,
                 prompt_input=prompt_input,
-                sql_query=validated_sql,
+                sql_query=outcome.sql_query,
                 summary=generation_result.summary,
-                token_usage=generation_result.token_usage,
+                token_usage=outcome.total_token_usage,
                 provider=generation_result.provider,
                 model_name=generation_result.model_name,
                 query_status="failed",
@@ -112,7 +137,7 @@ class QueryService:
             )
             raise
         result.summary = generation_result.summary
-        result.token_usage = generation_result.token_usage
+        result.token_usage = outcome.total_token_usage
         self._persist_query_turn(
             workspace_id=workspace.id,
             session_id=session.id,
