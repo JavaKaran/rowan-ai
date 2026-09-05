@@ -429,6 +429,7 @@ footer {
 }
 footer .brand {
   font-size: 22px;
+  color: var(--ink);
 }
 .workspace {
   display: flex;
