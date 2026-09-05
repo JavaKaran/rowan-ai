@@ -1,11 +1,16 @@
 import unittest
-from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routers.session import get_session_service
-from app.schemas import QueryTokenUsage, SessionListResponse, SessionQueryHistoryItem
+from app.schemas import (
+    QueryTokenUsage,
+    SessionListResponse,
+    SessionMetadata,
+    SessionQueryHistoryItem,
+    SessionResponse,
+)
 
 
 class SessionRouterTest(unittest.TestCase):
@@ -39,6 +44,11 @@ class SessionRouterTest(unittest.TestCase):
                 "session_key": "session-key",
                 "name": "Test session",
                 "is_connected": False,
+                "metadata": {
+                    "database_name": None,
+                    "database_type": None,
+                    "is_connected": False,
+                },
                 "messages": [],
             },
         )
@@ -52,6 +62,29 @@ class SessionRouterTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["is_connected"])
+
+    def test_get_session_includes_metadata_with_data_info(self):
+        app.dependency_overrides[get_session_service] = lambda: FakeSessionService(
+            metadata=SessionMetadata(
+                database_name="analytics",
+                database_type="postgresql",
+                is_connected=True,
+            )
+        )
+
+        response = self.client.get("/session/session-key")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            body["metadata"],
+            {
+                "database_name": "analytics",
+                "database_type": "postgresql",
+                "is_connected": True,
+            },
+        )
+        self.assertTrue(body["is_connected"])
 
     def test_get_session_includes_message_history_in_query_response_schema(self):
         app.dependency_overrides[get_session_service] = lambda: FakeSessionService(
@@ -156,20 +189,26 @@ class SessionRouterTest(unittest.TestCase):
 
 
 class FakeSessionService:
-    def __init__(self, history=None, list_response=None, is_connected=False):
+    def __init__(self, history=None, list_response=None, is_connected=False, metadata=None):
         self.history = history if history is not None else []
         self.list_response = list_response
         self.is_connected = is_connected
+        self.metadata = metadata
         self.list_calls = []
+        self.detail_calls = []
 
-    def get_session_by_key(self, workspace_key, session_key):
-        return SimpleNamespace(id=1, session_key=session_key, name="Test session")
-
-    def get_session_history(self, session_id):
-        return self.history
-
-    def is_session_connected(self, session_id):
-        return self.is_connected
+    def get_session_detail(self, workspace_key, session_key):
+        self.detail_calls.append((workspace_key, session_key))
+        metadata = self.metadata
+        if metadata is None:
+            metadata = SessionMetadata(is_connected=self.is_connected)
+        return SessionResponse(
+            session_key=session_key,
+            name="Test session",
+            is_connected=metadata.is_connected,
+            metadata=metadata,
+            messages=self.history,
+        )
 
     def list_sessions(self, workspace_key, page=1):
         self.list_calls.append((workspace_key, page))

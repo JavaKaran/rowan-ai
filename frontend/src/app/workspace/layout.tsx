@@ -72,7 +72,9 @@ export default function WorkspaceLayout({
       session_key: data.session_key,
       name: data.name,
       first_message: data.messages[0]?.question ?? null,
-      is_connected: data.is_connected,
+      is_connected: data.metadata?.is_connected ?? data.is_connected,
+      database: data.metadata?.database_name ?? undefined,
+      type: data.metadata?.database_type ?? undefined,
     };
     setSessions((items) =>
       items.some((item) => item.session_key === hydrated.session_key)
@@ -255,7 +257,9 @@ export default function WorkspaceLayout({
     query.mutate({ text: text.trim(), key: active, id });
   }
   return (
-    <div className={`workspace ${collapsed ? "sidebar-collapsed" : ""}`}>
+    <div
+      className={`workspace ${collapsed ? "sidebar-collapsed" : ""} ${isSessionRoute ? "session-route" : ""}`}
+    >
       <aside className="sidebar">
         <div className="sidebar-heading">
           <Brand />

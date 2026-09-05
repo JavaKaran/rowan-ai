@@ -15,7 +15,9 @@ from app.schemas import (
     QueryTokenUsage,
     SessionListItem,
     SessionListResponse,
+    SessionMetadata,
     SessionQueryHistoryItem,
+    SessionResponse,
 )
 from app.services.identifier import IdentifierService
 
@@ -106,6 +108,33 @@ class SessionService:
         if not self.database_connection_repository:
             return False
         return self.database_connection_repository.has_successful_connection(session_id)
+
+    def get_session_metadata(self, session_id: int) -> SessionMetadata:
+        if not self.database_connection_repository:
+            return SessionMetadata()
+        connection = self.database_connection_repository.get_successful_connection(
+            session_id
+        )
+        if not connection:
+            return SessionMetadata()
+        return SessionMetadata(
+            database_name=connection.database_name,
+            database_type=connection.database_type,
+            is_connected=True,
+        )
+
+    def get_session_detail(
+        self, workspace_key: str | None, session_key: str
+    ) -> SessionResponse:
+        session = self.get_session_by_key(workspace_key, session_key)
+        metadata = self.get_session_metadata(session.id)
+        return SessionResponse(
+            session_key=session.session_key,
+            name=session.name,
+            is_connected=metadata.is_connected,
+            metadata=metadata,
+            messages=self.get_session_history(session.id),
+        )
 
     def _is_connected(self, session: Any) -> bool:
         if not self.database_connection_repository:

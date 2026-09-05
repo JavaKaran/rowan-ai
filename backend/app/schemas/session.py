@@ -17,10 +17,17 @@ class SessionQueryHistoryItem(QueryResponse):
     error_message: str | None = None
 
 
+class SessionMetadata(BaseModel):
+    database_name: str | None = None
+    database_type: str | None = None
+    is_connected: bool = False
+
+
 class SessionResponse(BaseModel):
     session_key: str
     name: str | None = None
     is_connected: bool = False
+    metadata: SessionMetadata = Field(default_factory=SessionMetadata)
     messages: list[SessionQueryHistoryItem] = Field(default_factory=list)
 
     model_config = {

@@ -220,12 +220,69 @@ class SessionServiceIsConnectedTest(unittest.TestCase):
         self.assertFalse(service.is_session_connected(5))
 
 
+class SessionServiceDetailTest(unittest.TestCase):
+    def test_get_session_detail_includes_metadata_matching_listing(self):
+        sessions = [SimpleNamespace(id=7, session_key="sess_7", name="Chat")]
+        service = SessionService(
+            repository=FakeSessionRepository(sessions=sessions, total=1),
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            query_record_repository=FakeQueryRecordRepository([]),
+            database_connection_repository=FakeDatabaseConnectionRepository(
+                {7},
+                {
+                    7: SimpleNamespace(
+                        database_name="analytics",
+                        database_type="postgresql",
+                    )
+                },
+            ),
+        )
+
+        detail = service.get_session_detail("workspace-key", "sess_7")
+        listing = service.list_sessions("workspace-key")
+
+        self.assertEqual(detail.session_key, "sess_7")
+        self.assertEqual(detail.name, "Chat")
+        self.assertEqual(detail.messages, [])
+        self.assertTrue(detail.is_connected)
+        self.assertEqual(
+            detail.metadata.is_connected, listing.items[0].is_connected
+        )
+        self.assertEqual(detail.metadata.database_name, "analytics")
+        self.assertEqual(detail.metadata.database_type, "postgresql")
+
+    def test_get_session_detail_metadata_empty_without_connection(self):
+        sessions = [SimpleNamespace(id=7, session_key="sess_7", name=None)]
+        service = SessionService(
+            repository=FakeSessionRepository(sessions=sessions, total=1),
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            query_record_repository=FakeQueryRecordRepository([]),
+            database_connection_repository=FakeDatabaseConnectionRepository(set()),
+        )
+
+        detail = service.get_session_detail("workspace-key", "sess_7")
+
+        self.assertFalse(detail.is_connected)
+        self.assertIsNone(detail.metadata.database_name)
+        self.assertIsNone(detail.metadata.database_type)
+        self.assertFalse(detail.metadata.is_connected)
+
+
 class FakeDatabaseConnectionRepository:
-    def __init__(self, connected_session_ids):
+    def __init__(self, connected_session_ids, connections_by_session_id=None):
         self.connected_session_ids = connected_session_ids
+        self.connections_by_session_id = connections_by_session_id or {}
 
     def has_successful_connection(self, session_id):
         return session_id in self.connected_session_ids
+
+    def get_successful_connection(self, session_id):
+        if session_id not in self.connected_session_ids:
+            return None
+        return self.connections_by_session_id.get(
+            session_id,
+            SimpleNamespace(database_name="analytics", database_type="postgresql"),
+        )
 
 
 class FakeSessionRepository:
@@ -233,6 +290,11 @@ class FakeSessionRepository:
         self.sessions = sessions
         self.total = total
         self.calls = []
+
+    def get_by_key(self, session_key, workspace_id=None):
+        return next(
+            (s for s in self.sessions if s.session_key == session_key), None
+        )
 
     def list_for_workspace(self, workspace_id, page, page_size):
         self.calls.append((workspace_id, page, page_size))

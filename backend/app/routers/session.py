@@ -58,15 +58,7 @@ def get_session(
     workspace_key: Annotated[str | None, Header(alias="X-Workspace-Key")] = None,
     service: SessionService = Depends(get_session_service),
 ) -> SessionResponse:
-    session = service.get_session_by_key(workspace_key, session_key)
-    messages = service.get_session_history(session.id)
-    is_connected = service.is_session_connected(session.id)
-    return SessionResponse(
-        session_key=session.session_key,
-        name=session.name,
-        is_connected=is_connected,
-        messages=messages,
-    )
+    return service.get_session_detail(workspace_key, session_key)
 
 
 @router.patch("/{session_key}", response_model=SessionResponse)

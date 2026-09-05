@@ -3,9 +3,10 @@ import type { QueryResult } from "./query";
 /**
  * Session types.
  * Mirrors `backend/app/schemas/session.py`
- * (`SessionQueryHistoryItem` / `SessionResponse` /
+ * (`SessionQueryHistoryItem` / `SessionMetadata` / `SessionResponse` /
  * `SessionListItem` / `SessionListResponse`)
- * backed by the `sessions` table plus the first user `messages` row.
+ * backed by the `sessions` table plus the first user `messages` row
+ * and the `database_connections` row.
  */
 export type SessionMessage = QueryResult & {
   question: string;
@@ -13,10 +14,17 @@ export type SessionMessage = QueryResult & {
   error_message?: string | null;
 };
 
+export type SessionMetadata = {
+  database_name: string | null;
+  database_type: string | null;
+  is_connected: boolean;
+};
+
 export type SessionDetail = {
   session_key: string;
   name: string | null;
   is_connected: boolean;
+  metadata: SessionMetadata;
   messages: SessionMessage[];
 };
 
@@ -39,8 +47,8 @@ export type SessionListResponse = {
  * Workspace session as used by the UI: the backend list item plus
  * local-only connection display details. `is_connected` is authoritative
  * from the backend and survives reloads; `database` / `type` (the exact
- * connection name/dialect) are only known locally after connecting in the
- * current page lifetime, since the backend doesn't echo them back.
+ * connection name/dialect) hydrate from the session detail `metadata`
+ * and are set locally right after connecting.
  */
 export type Session = SessionListItem & {
   database?: string;

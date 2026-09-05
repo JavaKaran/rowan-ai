@@ -1258,6 +1258,19 @@ input::placeholder {
   .workspace-header .badge {
     display: none;
   }
+  .session-route .workspace-header .brand {
+    display: none;
+  }
+  .session-route .workspace-header .header-db {
+    display: block;
+    max-width: 38vw;
+  }
+  .session-route .workspace-header .badge {
+    display: inline-flex;
+  }
+  .session-route .header-new {
+    display: none;
+  }
   .header-new {
     display: inline-flex;
   }

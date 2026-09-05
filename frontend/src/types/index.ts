@@ -11,6 +11,7 @@ export type {
   SessionListItem,
   SessionListResponse,
   SessionMessage,
+  SessionMetadata,
   Turn,
 } from "./session";
 export type { Workspace } from "./workspace";
