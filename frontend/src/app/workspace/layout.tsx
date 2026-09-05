@@ -48,6 +48,9 @@ export default function WorkspaceLayout({
   const [question, setQuestion] = useState("");
   const [turns, setTurns] = useState<Record<string, Turn[]>>({});
   const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia("(max-width: 540px)").matches) setCollapsed(true);
+  }, []);
   const bottom = useRef<HTMLDivElement>(null);
   const hydratedHistoryRef = useRef<Set<string>>(new Set());
   const sessionListRef = useRef<HTMLDivElement>(null);
@@ -280,6 +283,8 @@ export default function WorkspaceLayout({
               onClick={() => {
                 setActive(item.session_key);
                 setQuestion("");
+                if (window.matchMedia("(max-width: 540px)").matches)
+                  setCollapsed(true);
                 router.push(
                   `/workspace/session/${encodeURIComponent(item.session_key)}`,
                 );
@@ -301,34 +306,48 @@ export default function WorkspaceLayout({
           )}
         </div>
       </aside>
+      <button
+        className="sidebar-backdrop"
+        aria-label="Close sidebar"
+        tabIndex={-1}
+        onClick={() => setCollapsed(true)}
+      />
       <main className="workspace-main">
-        {session && !session.database ? null : (
-          <header className="workspace-header">
-            <div>
-              {collapsed && (
-                <>
-                  <Brand />
-                  <button
-                    className="icon-button"
-                    aria-label="Expand sidebar"
-                    onClick={() => setCollapsed(false)}
-                  >
-                    <PanelLeftOpen size={19} />
-                  </button>
-                </>
-              )}
-              <strong className="header-db">{session?.database || "Get started"}</strong>
-              <span className="badge">
-                <span
-                  className={
-                    session?.database ? "status-dot" : "status-dot neutral"
-                  }
-                />
-                {session?.database ? "Connected" : "No database connected"}
-              </span>
-            </div>
-          </header>
-        )}
+        <header className="workspace-header">
+          <div>
+            {collapsed && (
+              <>
+                <Brand />
+                <button
+                  className="icon-button"
+                  aria-label="Expand sidebar"
+                  onClick={() => setCollapsed(false)}
+                >
+                  <PanelLeftOpen size={19} />
+                </button>
+              </>
+            )}
+            <strong className="header-db">{session?.database || "Get started"}</strong>
+            <span className="badge">
+              <span
+                className={
+                  session?.database ? "status-dot" : "status-dot neutral"
+                }
+              />
+              {session?.database ? "Connected" : "No database connected"}
+            </span>
+          </div>
+          <button
+            className="icon-button header-new"
+            aria-label="New conversation"
+            onClick={() => newSession.mutate()}
+            disabled={
+              !workspace.data || newSession.isPending || query.isPending
+            }
+          >
+            <Plus size={19} />
+          </button>
+        </header>
         {newSession.error && (
           <div className="error" role="alert">
             {newSession.error.message}

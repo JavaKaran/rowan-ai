@@ -523,6 +523,9 @@ footer .brand {
   height: 32px;
   color: var(--muted);
 }
+.sidebar-backdrop {
+  display: none;
+}
 .workspace-main {
   flex: 1;
   min-width: 0;
@@ -538,6 +541,12 @@ footer .brand {
   justify-content: space-between;
   padding: 0 32px;
   background: #f9faf7;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+.header-new {
+  display: none;
 }
 .workspace-header > div {
   display: flex;
@@ -1171,50 +1180,98 @@ input::placeholder {
     flex-direction: column;
   }
   .sidebar {
-    width: 100%;
-    height: auto;
-    max-height: 160px;
-    padding: 12px 15px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 9px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 85vw);
+    height: 100dvh;
+    max-height: none;
+    padding: 24px 17px;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    z-index: 60;
+    box-shadow: 20px 0 50px rgba(40, 56, 47, 0.16);
+    transform: translateX(0);
+    transition:
+      transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+      visibility 0s;
   }
   .sidebar-collapsed .sidebar {
-    display: none;
+    display: flex;
     margin-left: 0;
+    opacity: 1;
+    transform: translateX(-105%);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+      visibility 0s linear 0.3s;
   }
   .sidebar-heading {
-    margin: 0;
+    margin: 0 0 30px;
+    padding: 0 7px;
+    flex-direction: row-reverse;
+  }
+  .sidebar-heading .icon-button {
+    display: inline-flex;
   }
   .new-session {
-    padding: 8px;
-    font-size: 11px;
+    padding: 11px;
+    font-size: 12px;
   }
   .sidebar-label {
-    display: none;
+    display: block;
   }
   .session-list {
-    grid-column: 1/-1;
-    display: flex;
-    gap: 5px;
-    overflow-x: auto;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
   .session-list button {
-    min-width: 140px;
-    width: 140px;
-    padding: 7px;
-    font-size: 10px;
+    min-width: 0;
+    width: 100%;
+    padding: 12px 10px;
+    font-size: 12px;
   }
   .session-list small {
+    display: block;
+  }
+  .workspace-header > div .icon-button {
+    order: -1;
+  }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(40, 56, 47, 0.4);
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    cursor: default;
+  }
+  .sidebar-collapsed .sidebar-backdrop {
     display: none;
   }
   .workspace-main {
     min-height: 0;
   }
   .workspace-header {
-    height: 48px;
+    height: 56px;
+  }
+  .workspace-header > div {
+    gap: 12px;
+  }
+  .workspace-header .header-db,
+  .workspace-header .badge {
+    display: none;
+  }
+  .header-new {
+    display: inline-flex;
   }
   .chat-welcome h1 {
     font-size: 25px;
