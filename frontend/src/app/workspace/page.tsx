@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowUp,
-  Database,
   Plus,
   MessageSquare,
   LoaderCircle,
@@ -278,12 +277,6 @@ export default function Workspace() {
               <div className="conversation-inner">
                 {!currentTurns.length ? (
                   <div className="chat-welcome">
-                    <div className="large-icon">
-                      <Database size={25} />
-                    </div>
-                    <span className="connected-label">
-                      {session.database} is connected
-                    </span>
                     <h1>What would you like to know?</h1>
                     <p>
                       Ask about your data in your own words.
