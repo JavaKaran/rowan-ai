@@ -380,7 +380,7 @@ export default function Workspace() {
                   </button>
                 </div>
               </form>
-              <p>Read-only queries. Review the SQL when accuracy matters.</p>
+              <p>Rowan can make mistakes. Check important info.</p>
             </div>
           </>
         )}
