@@ -169,13 +169,10 @@ export function QueryResult({ result }: { result: Result }) {
             {[
               ["Execution time", `${result.execution_time_ms} ms`],
               ["Rows returned", result.row_count],
-              ["Attempts", result.attempt_count],
-              ["Repaired", result.repaired ? "Yes" : "No"],
               ["Total tokens", result.token_usage.total_tokens],
               ["Input tokens", result.token_usage.input_tokens],
               ["Output tokens", result.token_usage.output_tokens],
               ["Cached input", result.token_usage.cached_input_tokens],
-              ["Truncated", result.truncated ? "Yes" : "No"],
             ].map(([label, value]) => (
               <div key={label}>
                 <dt>{label}</dt>
@@ -183,28 +180,6 @@ export function QueryResult({ result }: { result: Result }) {
               </div>
             ))}
           </dl>
-          <div className="tool-traces">
-            <h4>Agent activity</h4>
-            {result.tool_calls.length ? (
-              result.tool_calls.map((tool, index) => (
-                <details key={index}>
-                  <summary>
-                    {tool.name || "Tool call"}{" "}
-                    <span>Attempt {tool.attempt_number}</span>
-                  </summary>
-                  <pre>
-                    {JSON.stringify(
-                      { arguments: tool.args, result: tool.result },
-                      null,
-                      2,
-                    )}
-                  </pre>
-                </details>
-              ))
-            ) : (
-              <p>No tool activity returned for this query.</p>
-            )}
-          </div>
         </Tabs.Content>
       </Tabs.Root>
     </div>
