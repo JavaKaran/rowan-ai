@@ -72,6 +72,7 @@ export default function WorkspaceLayout({
       session_key: data.session_key,
       name: data.name,
       first_message: data.messages[0]?.question ?? null,
+      is_connected: data.is_connected,
     };
     setSessions((items) =>
       items.some((item) => item.session_key === hydrated.session_key)
@@ -136,6 +137,7 @@ export default function WorkspaceLayout({
           session_key: item.session_key,
           name: local?.name ?? item.name,
           first_message: local?.first_message ?? item.first_message,
+          is_connected: local?.is_connected ?? item.is_connected,
           database: local?.database,
           type: local?.type,
         };
@@ -184,6 +186,7 @@ export default function WorkspaceLayout({
         session_key: data.session_key,
         name: null,
         first_message: null,
+        is_connected: false,
       };
       setSessions((items) => [next, ...items]);
       setActive(next.session_key);
@@ -234,7 +237,7 @@ export default function WorkspaceLayout({
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentTurns.length, query.isPending]);
   function ask(text: string) {
-    if (!active || !session?.database || !text.trim() || query.isPending)
+    if (!active || !session?.is_connected || !text.trim() || query.isPending)
       return;
     const id = crypto.randomUUID();
     setTurns((previous) => ({
@@ -291,10 +294,7 @@ export default function WorkspaceLayout({
               }}
             >
               <MessageSquare size={16} />
-              <span>
-                {sessionDisplayName(item)}
-                {item.database && <small>{item.database}</small>}
-              </span>
+              <span>{sessionDisplayName(item)}</span>
             </button>
           ))}
           {sessionsQuery.hasNextPage && (
@@ -327,14 +327,16 @@ export default function WorkspaceLayout({
                 <Brand />
               </>
             )}
-            <strong className="header-db">{session?.database || "Get started"}</strong>
+            <strong className="header-db">
+              {session?.database || (session?.is_connected ? "Connected" : "Get started")}
+            </strong>
             <span className="badge">
               <span
                 className={
-                  session?.database ? "status-dot" : "status-dot neutral"
+                  session?.is_connected ? "status-dot" : "status-dot neutral"
                 }
               />
-              {session?.database ? "Connected" : "No database connected"}
+              {session?.is_connected ? "Connected" : "No database connected"}
             </span>
           </div>
           <button
@@ -402,7 +404,7 @@ export default function WorkspaceLayout({
               </>
             )}
           </div>
-        ) : !session.database && currentTurns.length === 0 ? (
+        ) : !session.is_connected && currentTurns.length === 0 ? (
           isHydratingActive ? (
             <div className="center-state">
               <LoaderCircle className="spin" />
@@ -417,7 +419,7 @@ export default function WorkspaceLayout({
                 setSessions((items) =>
                   items.map((item) =>
                     item.session_key === session.session_key
-                      ? { ...item, database, type }
+                      ? { ...item, database, type, is_connected: true }
                       : item,
                   ),
                 )

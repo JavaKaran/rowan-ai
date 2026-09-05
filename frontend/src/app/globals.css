@@ -510,12 +510,6 @@ footer .brand {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.session-list small {
-  display: block;
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 5px;
-}
 .session-list-sentinel {
   display: flex;
   align-items: center;
@@ -1236,9 +1230,6 @@ input::placeholder {
     width: 100%;
     padding: 12px 10px;
     font-size: 12px;
-  }
-  .session-list small {
-    display: block;
   }
   .sidebar-backdrop {
     display: block;

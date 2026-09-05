@@ -151,6 +151,35 @@ class SessionServiceListTest(unittest.TestCase):
 
         self.assertIsNone(result.items[0].first_message)
 
+    def test_list_sessions_includes_is_connected(self):
+        sessions = [
+            SimpleNamespace(id=1, session_key="sess_connected", name=None),
+            SimpleNamespace(id=2, session_key="sess_not_connected", name=None),
+        ]
+        repository = FakeSessionRepository(sessions=sessions, total=2)
+        service = SessionService(
+            repository=repository,
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            database_connection_repository=FakeDatabaseConnectionRepository({1}),
+        )
+
+        result = service.list_sessions("workspace-key")
+
+        self.assertTrue(result.items[0].is_connected)
+        self.assertFalse(result.items[1].is_connected)
+
+    def test_list_sessions_is_connected_defaults_false_without_repository(self):
+        sessions = [SimpleNamespace(id=1, session_key="sess_0", name=None)]
+        repository = FakeSessionRepository(sessions=sessions, total=1)
+        service = SessionService(
+            repository=repository,
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+        )
+
+        result = service.list_sessions("workspace-key")
+
+        self.assertFalse(result.items[0].is_connected)
+
     def test_list_sessions_defaults_to_page_one(self):
         repository = FakeSessionRepository(sessions=[], total=0)
         service = SessionService(
@@ -172,6 +201,31 @@ class SessionServiceListTest(unittest.TestCase):
 
         with self.assertRaises(WorkspaceNotFound):
             service.list_sessions("missing-workspace")
+
+
+class SessionServiceIsConnectedTest(unittest.TestCase):
+    def test_is_session_connected_true_when_repository_reports_connection(self):
+        service = SessionService(
+            repository=None,
+            workspace_repository=None,
+            database_connection_repository=FakeDatabaseConnectionRepository({5}),
+        )
+
+        self.assertTrue(service.is_session_connected(5))
+        self.assertFalse(service.is_session_connected(6))
+
+    def test_is_session_connected_false_without_repository(self):
+        service = SessionService(repository=None, workspace_repository=None)
+
+        self.assertFalse(service.is_session_connected(5))
+
+
+class FakeDatabaseConnectionRepository:
+    def __init__(self, connected_session_ids):
+        self.connected_session_ids = connected_session_ids
+
+    def has_successful_connection(self, session_id):
+        return session_id in self.connected_session_ids
 
 
 class FakeSessionRepository:

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.dependencies import get_workspace_key
 from app.repositories import (
+    DatabaseConnectionRepository,
     MessageRepository,
     QueryRecordRepository,
     SessionRepository,
@@ -22,8 +23,13 @@ def get_session_service(db: Session = Depends(get_db)) -> SessionService:
     workspace_repository = WorkspaceRepository(db)
     query_record_repository = QueryRecordRepository(db)
     message_repository = MessageRepository(db)
+    database_connection_repository = DatabaseConnectionRepository(db)
     return SessionService(
-        repository, workspace_repository, query_record_repository, message_repository
+        repository,
+        workspace_repository,
+        query_record_repository,
+        message_repository,
+        database_connection_repository,
     )
 
 
@@ -54,7 +60,13 @@ def get_session(
 ) -> SessionResponse:
     session = service.get_session_by_key(workspace_key, session_key)
     messages = service.get_session_history(session.id)
-    return SessionResponse(session_key=session.session_key, name=session.name, messages=messages)
+    is_connected = service.is_session_connected(session.id)
+    return SessionResponse(
+        session_key=session.session_key,
+        name=session.name,
+        is_connected=is_connected,
+        messages=messages,
+    )
 
 
 @router.patch("/{session_key}", response_model=SessionResponse)

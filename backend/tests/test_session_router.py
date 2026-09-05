@@ -38,9 +38,20 @@ class SessionRouterTest(unittest.TestCase):
             {
                 "session_key": "session-key",
                 "name": "Test session",
+                "is_connected": False,
                 "messages": [],
             },
         )
+
+    def test_get_session_includes_is_connected(self):
+        app.dependency_overrides[get_session_service] = lambda: FakeSessionService(
+            is_connected=True
+        )
+
+        response = self.client.get("/session/session-key")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["is_connected"])
 
     def test_get_session_includes_message_history_in_query_response_schema(self):
         app.dependency_overrides[get_session_service] = lambda: FakeSessionService(
@@ -89,6 +100,7 @@ class SessionRouterTest(unittest.TestCase):
                         "session_key": "sess_1",
                         "name": "Chat 1",
                         "first_message": "How many users signed up last week?",
+                        "is_connected": True,
                     }
                 ],
                 page=1,
@@ -111,6 +123,7 @@ class SessionRouterTest(unittest.TestCase):
                     "session_key": "sess_1",
                     "name": "Chat 1",
                     "first_message": "How many users signed up last week?",
+                    "is_connected": True,
                 }
             ],
         )
@@ -143,9 +156,10 @@ class SessionRouterTest(unittest.TestCase):
 
 
 class FakeSessionService:
-    def __init__(self, history=None, list_response=None):
+    def __init__(self, history=None, list_response=None, is_connected=False):
         self.history = history if history is not None else []
         self.list_response = list_response
+        self.is_connected = is_connected
         self.list_calls = []
 
     def get_session_by_key(self, workspace_key, session_key):
@@ -153,6 +167,9 @@ class FakeSessionService:
 
     def get_session_history(self, session_id):
         return self.history
+
+    def is_session_connected(self, session_id):
+        return self.is_connected
 
     def list_sessions(self, workspace_key, page=1):
         self.list_calls.append((workspace_key, page))

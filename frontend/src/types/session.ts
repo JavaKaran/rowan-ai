@@ -16,6 +16,7 @@ export type SessionMessage = QueryResult & {
 export type SessionDetail = {
   session_key: string;
   name: string | null;
+  is_connected: boolean;
   messages: SessionMessage[];
 };
 
@@ -23,6 +24,7 @@ export type SessionListItem = {
   session_key: string;
   name: string | null;
   first_message: string | null;
+  is_connected: boolean;
 };
 
 export type SessionListResponse = {
@@ -35,9 +37,10 @@ export type SessionListResponse = {
 
 /**
  * Workspace session as used by the UI: the backend list item plus
- * local-only connection state (the backend exposes no connection-status
- * endpoint, so `database` / `type` are only known after connecting
- * in the current page lifetime).
+ * local-only connection display details. `is_connected` is authoritative
+ * from the backend and survives reloads; `database` / `type` (the exact
+ * connection name/dialect) are only known locally after connecting in the
+ * current page lifetime, since the backend doesn't echo them back.
  */
 export type Session = SessionListItem & {
   database?: string;

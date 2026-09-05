@@ -20,6 +20,7 @@ class SessionQueryHistoryItem(QueryResponse):
 class SessionResponse(BaseModel):
     session_key: str
     name: str | None = None
+    is_connected: bool = False
     messages: list[SessionQueryHistoryItem] = Field(default_factory=list)
 
     model_config = {
@@ -31,6 +32,7 @@ class SessionListItem(BaseModel):
     session_key: str
     name: str | None = None
     first_message: str | None = None
+    is_connected: bool = False
 
     model_config = {
         "from_attributes": True

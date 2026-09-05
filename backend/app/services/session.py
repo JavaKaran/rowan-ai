@@ -4,6 +4,7 @@ from typing import Any
 from app.exceptions import SessionNotFound, WorkspaceNotFound
 from app.models import Session
 from app.repositories import (
+    DatabaseConnectionRepository,
     MessageRepository,
     QueryRecordRepository,
     SessionRepository,
@@ -28,11 +29,13 @@ class SessionService:
         workspace_repository: WorkspaceRepository,
         query_record_repository: QueryRecordRepository | None = None,
         message_repository: MessageRepository | None = None,
+        database_connection_repository: DatabaseConnectionRepository | None = None,
     ):
         self.repository = repository
         self.workspace_repository = workspace_repository
         self.query_record_repository = query_record_repository
         self.message_repository = message_repository
+        self.database_connection_repository = database_connection_repository
 
     def create_session(self, workspace_key: str, name: str | None = None) -> Session:
         workspace = self.workspace_repository.get_by_key(workspace_key)
@@ -89,6 +92,7 @@ class SessionService:
                     session_key=session.session_key,
                     name=session.name,
                     first_message=self._first_message(session),
+                    is_connected=self._is_connected(session),
                 )
                 for session in sessions
             ],
@@ -97,6 +101,16 @@ class SessionService:
             total=total,
             total_pages=math.ceil(total / SESSION_LIST_PAGE_SIZE) if total else 0,
         )
+
+    def is_session_connected(self, session_id: int) -> bool:
+        if not self.database_connection_repository:
+            return False
+        return self.database_connection_repository.has_successful_connection(session_id)
+
+    def _is_connected(self, session: Any) -> bool:
+        if not self.database_connection_repository:
+            return False
+        return self.database_connection_repository.has_successful_connection(session.id)
 
     def _first_message(self, session: Any) -> str | None:
         if not self.message_repository:
