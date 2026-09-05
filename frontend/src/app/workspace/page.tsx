@@ -6,7 +6,6 @@ import {
   Database,
   Plus,
   MessageSquare,
-  ShieldCheck,
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
@@ -183,12 +182,6 @@ export default function Workspace() {
               </span>
             </button>
           ))}
-        </div>
-        <div className="sidebar-bottom">
-          <ShieldCheck size={17} />
-          <div>
-            Just your workspace<small>Remembered in this browser</small>
-          </div>
         </div>
       </aside>
       <main className="workspace-main">
