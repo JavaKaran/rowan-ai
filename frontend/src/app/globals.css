@@ -764,7 +764,8 @@ input::placeholder {
   resize: vertical;
   max-height: 160px;
   min-height: 50px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   background: transparent;
   padding: 3px;
   line-height: 1.5;
@@ -773,18 +774,10 @@ input::placeholder {
 .composer textarea:focus {
   outline: 0;
 }
-.composer > div {
+.composer-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 7px;
-}
-.composer > div > span {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  font-size: 10px;
-  color: var(--muted);
+  gap: 10px;
 }
 .send-button {
   display: flex;
@@ -792,6 +785,7 @@ input::placeholder {
   justify-content: center;
   width: 33px;
   height: 33px;
+  flex-shrink: 0;
   background: var(--green);
   color: white;
   border: 0;

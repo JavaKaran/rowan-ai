@@ -354,29 +354,25 @@ export default function Workspace() {
                   ask(question);
                 }}
               >
-                <textarea
-                  aria-label="Ask a question about your data"
-                  placeholder="Ask anything about your data…"
-                  value={question}
-                  onChange={(event) => setQuestion(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.key === "Enter" &&
-                      !event.shiftKey &&
-                      !event.nativeEvent.isComposing
-                    ) {
-                      event.preventDefault();
-                      ask(question);
-                    }
-                  }}
-                  rows={2}
-                  maxLength={10000}
-                />
-                <div>
-                  <span>
-                    <Database size={13} />
-                    {session.database}
-                  </span>
+                <div className="composer-row">
+                  <textarea
+                    aria-label="Ask a question about your data"
+                    placeholder="Ask anything about your data…"
+                    value={question}
+                    onChange={(event) => setQuestion(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
+                        event.preventDefault();
+                        ask(question);
+                      }
+                    }}
+                    rows={2}
+                    maxLength={10000}
+                  />
                   <button
                     className="send-button"
                     type="submit"
