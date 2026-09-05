@@ -1,6 +1,6 @@
 from .database_connection import DatabaseConnectionCreate, DatabaseConnectionResponse
 from .query import QueryRequest, QueryResponse, QueryTokenUsage, QueryToolCallInfo
-from .session import SessionCreate, SessionResponse, SessionUpdate
+from .session import SessionCreate, SessionQueryHistoryItem, SessionResponse, SessionUpdate
 from .workspace import WorkspaceCreate, WorkspaceResponse, WorkspaceUpdate
 
 __all__ = [
@@ -11,6 +11,7 @@ __all__ = [
     "QueryTokenUsage",
     "QueryToolCallInfo",
     "SessionCreate",
+    "SessionQueryHistoryItem",
     "SessionResponse",
     "SessionUpdate",
     "WorkspaceCreate",

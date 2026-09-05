@@ -39,6 +39,16 @@ export type QueryResult = {
     result?: unknown;
   }[];
 };
+export type SessionMessage = QueryResult & {
+  question: string;
+  status: string;
+  error_message?: string | null;
+};
+export type SessionDetail = {
+  session_key: string;
+  name: string | null;
+  messages: SessionMessage[];
+};
 export async function request<T>(
   path: string,
   context?: Context,

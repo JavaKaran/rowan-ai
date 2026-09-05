@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowUp,
@@ -19,14 +19,17 @@ import {
   ensureWorkspace,
   QueryResult as Result,
   request,
+  SessionDetail,
 } from "@/lib/api";
 type Session = { key: string; name: string; database?: string; type?: string };
 type Turn = { id: string; question: string; result?: Result; error?: string };
 export default function Workspace() {
   const router = useRouter();
+  const pathname = usePathname();
   const params = useParams<{ sessionId?: string }>();
   const initialSessionKey =
     typeof params.sessionId === "string" ? params.sessionId : undefined;
+  const isSessionRoute = pathname.startsWith("/workspace/session/");
   const workspace = useQuery({
     queryKey: ["workspace"],
     queryFn: ensureWorkspace,
@@ -40,6 +43,7 @@ export default function Workspace() {
   const [turns, setTurns] = useState<Record<string, Turn[]>>({});
   const [collapsed, setCollapsed] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const hydratedHistoryRef = useRef<Set<string>>(new Set());
   const session = sessions.find((item) => item.key === active);
   useEffect(() => {
     if (!workspace.data) return;
@@ -53,9 +57,9 @@ export default function Workspace() {
         );
         setSessions(valid);
         setActive(
-          valid.some((item) => item.key === initialSessionKey)
+          initialSessionKey && valid.some((item) => item.key === initialSessionKey)
             ? initialSessionKey
-            : valid[0]?.key,
+            : undefined,
         );
       }
     } catch {
@@ -66,11 +70,62 @@ export default function Workspace() {
     setLoaded(true);
   }, [initialSessionKey, workspace.data]);
   useEffect(() => {
-    if (!loaded || !initialSessionKey) return;
+    if (!loaded || !initialSessionKey) {
+      setActive(undefined);
+      return;
+    }
     if (sessions.some((item) => item.key === initialSessionKey)) {
       setActive(initialSessionKey);
     }
   }, [initialSessionKey, loaded, sessions]);
+  const sessionLookup = useQuery({
+    queryKey: ["session", workspace.data, initialSessionKey],
+    queryFn: () =>
+      request<SessionDetail>(
+        `session/${encodeURIComponent(initialSessionKey!)}`,
+        { workspace: workspace.data! },
+      ),
+    enabled: Boolean(workspace.data) && loaded && Boolean(initialSessionKey),
+    retry: false,
+  });
+  useEffect(() => {
+    const data = sessionLookup.data;
+    if (!data) return;
+    const hydrated = {
+      key: data.session_key,
+      name: data.name || "New conversation",
+    };
+    setSessions((items) =>
+      items.some((item) => item.key === hydrated.key)
+        ? items
+        : [hydrated, ...items],
+    );
+    setActive(hydrated.key);
+  }, [sessionLookup.data]);
+  useEffect(() => {
+    const data = sessionLookup.data;
+    if (!data) return;
+    if (hydratedHistoryRef.current.has(data.session_key)) return;
+    hydratedHistoryRef.current.add(data.session_key);
+    if (!data.messages.length) return;
+    setTurns((previous) =>
+      previous[data.session_key]
+        ? previous
+        : {
+            ...previous,
+            [data.session_key]: data.messages.map((message) => ({
+              id: crypto.randomUUID(),
+              question: message.question,
+              result: message.status === "completed" ? message : undefined,
+              error:
+                message.status === "completed"
+                  ? undefined
+                  : message.error_message ||
+                    "This question could not be completed.",
+            })),
+          },
+    );
+  }, [sessionLookup.data]);
   useEffect(() => {
     if (loaded && workspace.data) {
       try {
@@ -254,23 +309,36 @@ export default function Workspace() {
             <div className="large-icon">
               <MessageSquare size={27} />
             </div>
-            <h1>A fresh place to explore.</h1>
-            <p>
-              Start a conversation, connect your database, and follow your
-              curiosity.
-            </p>
-            <button
-              className="button"
-              disabled={!loaded || newSession.isPending}
-              onClick={() => newSession.mutate()}
-            >
-              {newSession.isPending ? (
-                <LoaderCircle size={16} className="spin" />
-              ) : (
-                <Plus size={16} />
-              )}
-              Start a conversation
-            </button>
+            {isSessionRoute && sessionLookup.isPending ? (
+              <>
+                <h1>Opening conversation.</h1>
+                <p>Loading this session for your workspace.</p>
+              </>
+            ) : isSessionRoute && sessionLookup.error ? (
+              <>
+                <h1>Conversation not found.</h1>
+                <p role="alert">
+                  This session is unavailable for the current workspace.
+                </p>
+              </>
+            ) : (
+              <>
+                <h1>No conversation selected.</h1>
+                <p>Select a conversation from the sidebar or start a new one.</p>
+                <button
+                  className="button"
+                  disabled={!loaded || newSession.isPending}
+                  onClick={() => newSession.mutate()}
+                >
+                  {newSession.isPending ? (
+                    <LoaderCircle size={16} className="spin" />
+                  ) : (
+                    <Plus size={16} />
+                  )}
+                  Start a conversation
+                </button>
+              </>
+            )}
           </div>
         ) : !session.database ? (
           <div className="connection-container">
@@ -312,10 +380,6 @@ export default function Workspace() {
                         </button>
                       ))}
                     </div>
-                    <p className="small-note">
-                      Earlier results aren’t restored after a reload. You can
-                      keep asking questions in this session.
-                    </p>
                   </div>
                 ) : (
                   currentTurns.map((turn) => (

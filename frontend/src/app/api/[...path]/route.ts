@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 const allowed =
-  /^(workspace\/(?:[\w-]+)?|session\/(?:[\w-]+)?|connection|query)$/;
+  /^(workspace(?:\/[\w-]+)?|session(?:\/[\w-]+)?|connection|query)$/;
 async function proxy(
   request: NextRequest,
   { params }: { params: Promise<{ path: string[] }> },
