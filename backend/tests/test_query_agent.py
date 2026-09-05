@@ -1,5 +1,7 @@
+import os
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import groq
 import httpx
@@ -8,9 +10,11 @@ from langgraph.errors import GraphRecursionError
 
 from app.exceptions import AgentRecursionLimitExceeded, SQLGenerationFailed, SQLGenerationTimedOut
 from app.services.query_agent import (
+    DEFAULT_MAX_OUTPUT_TOKENS,
     GeneratedSQL,
     LangChainQueryAgent,
     build_schema_retrieval_tools,
+    create_query_agent,
 )
 from app.services.schema_retrieval import SchemaRetrievalService
 
@@ -127,7 +131,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
 
         agent = LangChainQueryAgent(
             model_name="llama-3.3-70b-versatile",
-            llm_factory=lambda model_name, temperature, timeout_seconds: None,
+            llm_factory=lambda model_name, temperature, timeout_seconds, max_output_tokens: None,
             agent_factory=agent_factory,
         )
 
@@ -149,6 +153,15 @@ class LangChainQueryAgentTest(unittest.TestCase):
             captured["tools"],
             ["find_relevant_tables", "get_columns", "get_relationships"],
         )
+        self.assertIn("summary in natural language", captured["system_prompt"])
+        self.assertIn("describe what data the query returns", captured["system_prompt"])
+        self.assertIn("Avoid robotic phrasing", captured["system_prompt"])
+
+    def test_generated_sql_summary_schema_guides_natural_language_output(self):
+        summary_schema = GeneratedSQL.model_json_schema()["properties"]["summary"]
+
+        self.assertIn("Natural-language explanation", summary_schema["description"])
+        self.assertIn("helps the user understand", summary_schema["description"])
 
     def test_generate_sql_aggregates_multiple_tool_call_rounds(self):
         round_one = AIMessage(
@@ -370,8 +383,46 @@ class LangChainQueryAgentTest(unittest.TestCase):
             agent_factory=lambda *args, **kwargs: FailingAgent(),
         )
 
-        with self.assertRaises(SQLGenerationFailed):
+        with self.assertRaises(SQLGenerationFailed) as ctx:
             agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(
+            str(ctx.exception),
+            "Unable to generate a SQL query right now. Please try again.",
+        )
+
+    def test_generate_sql_includes_provider_error_message_when_available(self):
+        response = httpx.Response(
+            status_code=400,
+            json={
+                "error": {
+                    "message": "Tool use and structured output cannot be combined."
+                }
+            },
+            request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"),
+        )
+
+        class FailingAgent:
+            def invoke(self, input_, config=None):
+                raise groq.BadRequestError(
+                    "bad request",
+                    response=response,
+                    body=response.json(),
+                )
+
+        agent = LangChainQueryAgent(
+            model_name="m",
+            llm_factory=lambda *args: None,
+            agent_factory=lambda *args, **kwargs: FailingAgent(),
+        )
+
+        with self.assertRaises(SQLGenerationFailed) as ctx:
+            agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(
+            str(ctx.exception),
+            "LLM provider error (400): Tool use and structured output cannot be combined.",
+        )
 
     def test_repair_sql_includes_previous_sql_and_failure_detail_in_message(self):
         state = {
@@ -521,16 +572,18 @@ class LangChainQueryAgentTest(unittest.TestCase):
             "We're unable to complete your query at the moment. Please try again.",
         )
 
-    def test_default_llm_factory_passes_configured_timeout_to_chat_groq(self):
+    def test_llm_factory_receives_configured_timeout_and_max_output_tokens(self):
         captured = {}
 
-        def spy_llm_factory(model_name, temperature, timeout_seconds):
+        def spy_llm_factory(model_name, temperature, timeout_seconds, max_output_tokens):
             captured["timeout_seconds"] = timeout_seconds
+            captured["max_output_tokens"] = max_output_tokens
             return None
 
         agent = LangChainQueryAgent(
             model_name="m",
             timeout_seconds=42.0,
+            max_output_tokens=700,
             llm_factory=spy_llm_factory,
             agent_factory=lambda *args, **kwargs: FakeAgent(
                 {
@@ -543,6 +596,18 @@ class LangChainQueryAgentTest(unittest.TestCase):
         agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
 
         self.assertEqual(captured["timeout_seconds"], 42.0)
+        self.assertEqual(captured["max_output_tokens"], 700)
+
+    def test_create_query_agent_uses_safe_default_max_output_tokens(self):
+        agent = create_query_agent()
+
+        self.assertEqual(agent.max_output_tokens, DEFAULT_MAX_OUTPUT_TOKENS)
+
+    def test_create_query_agent_reads_max_output_tokens_from_environment(self):
+        with patch.dict(os.environ, {"QUERY_MODEL_MAX_TOKENS": "600"}):
+            agent = create_query_agent()
+
+        self.assertEqual(agent.max_output_tokens, 600)
 
 
 if __name__ == "__main__":

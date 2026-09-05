@@ -9,7 +9,7 @@ from langchain_core.messages import ToolMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.errors import GraphRecursionError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.exceptions import AgentRecursionLimitExceeded, SQLGenerationFailed, SQLGenerationTimedOut
 from app.schemas import QueryTokenUsage
@@ -17,6 +17,7 @@ from app.services.schema_retrieval import SchemaRetrievalService
 
 DEFAULT_RECURSION_LIMIT = 20
 DEFAULT_LLM_TIMEOUT_SECONDS = 60.0
+DEFAULT_MAX_OUTPUT_TOKENS = 800
 
 AGENT_SYSTEM_PROMPT = (
     "You are a read-only SQL generation assistant. "
@@ -29,15 +30,23 @@ AGENT_SYSTEM_PROMPT = (
     "For meta-questions about the database itself (e.g. what tables exist, "
     "what columns a table has), query the standard information_schema views "
     "(information_schema.tables, information_schema.columns) instead of the "
-    "application tables. Generate exactly one "
-    "read-only SQL query and a short summary that explains what the query "
-    "does. Add a LIMIT when the question does not require the full dataset."
+    "application tables. Generate exactly one read-only SQL query. "
+    "Write the summary in natural language for a person reading the result: "
+    "describe what data the query returns and what it helps them understand. "
+    "Avoid robotic phrasing like 'This query fetches...' and do not claim "
+    "insights that are not visible from the selected data. Add a LIMIT when "
+    "the question does not require the full dataset."
 )
 
 
 class GeneratedSQL(BaseModel):
     sql_query: str
-    summary: str
+    summary: str = Field(
+        description=(
+            "Natural-language explanation of the data returned and what it "
+            "helps the user understand, without unsupported conclusions."
+        )
+    )
 
 
 class QueryAgentResult(BaseModel):
@@ -76,7 +85,8 @@ class LangChainQueryAgent:
         provider: str = "groq",
         recursion_limit: int = DEFAULT_RECURSION_LIMIT,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS,
-        llm_factory: Callable[[str, float, float], Any] | None = None,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
+        llm_factory: Callable[[str, float, float, int], Any] | None = None,
         agent_factory: Callable[..., Any] | None = None,
     ):
         self.model_name = model_name
@@ -84,12 +94,23 @@ class LangChainQueryAgent:
         self.provider = provider
         self.recursion_limit = recursion_limit
         self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max_output_tokens
         self._llm_factory = llm_factory or self._default_llm_factory
         self._agent_factory = agent_factory or create_agent
 
     @staticmethod
-    def _default_llm_factory(model_name: str, temperature: float, timeout_seconds: float) -> Any:
-        return ChatGroq(model_name=model_name, temperature=temperature, timeout=timeout_seconds)
+    def _default_llm_factory(
+        model_name: str,
+        temperature: float,
+        timeout_seconds: float,
+        max_output_tokens: int,
+    ) -> Any:
+        return ChatGroq(
+            model_name=model_name,
+            temperature=temperature,
+            timeout=timeout_seconds,
+            max_tokens=max_output_tokens,
+        )
 
     def generate_sql(
         self,
@@ -130,7 +151,12 @@ class LangChainQueryAgent:
     def _run(self, metadata_json: dict[str, Any], user_message: str) -> QueryAgentResult:
         retrieval_service = SchemaRetrievalService(metadata_json)
         tools = build_schema_retrieval_tools(retrieval_service)
-        llm = self._llm_factory(self.model_name, self.temperature, self.timeout_seconds)
+        llm = self._llm_factory(
+            self.model_name,
+            self.temperature,
+            self.timeout_seconds,
+            self.max_output_tokens,
+        )
         agent = self._agent_factory(
             llm,
             tools=tools,
@@ -151,7 +177,7 @@ class LangChainQueryAgent:
         except groq.APITimeoutError as exc:
             raise SQLGenerationTimedOut() from exc
         except Exception as exc:
-            raise SQLGenerationFailed("Failed to generate SQL query.") from exc
+            raise SQLGenerationFailed(self._format_provider_error(exc)) from exc
 
         structured = state.get("structured_response")
         if structured is None:
@@ -234,6 +260,48 @@ class LangChainQueryAgent:
             "Generate SQL using exactly the target_database_type dialect.",
         ]
 
+    def _format_provider_error(self, exc: Exception) -> str:
+        response = getattr(exc, "response", None)
+        status_code = getattr(response, "status_code", None)
+        provider_message = self._extract_provider_error_message(response)
+
+        if provider_message and status_code:
+            return f"LLM provider error ({status_code}): {provider_message}"
+
+        if provider_message:
+            return f"LLM provider error: {provider_message}"
+
+        if status_code:
+            return f"LLM provider error ({status_code}). Please try again."
+
+        return "Unable to generate a SQL query right now. Please try again."
+
+    def _extract_provider_error_message(self, response: Any) -> str | None:
+        if response is None:
+            return None
+
+        try:
+            payload = response.json()
+        except Exception:
+            payload = None
+
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                message = error.get("message")
+                if isinstance(message, str) and message.strip():
+                    return message.strip()
+
+            detail = payload.get("detail") or payload.get("message")
+            if isinstance(detail, str) and detail.strip():
+                return detail.strip()
+
+        text = getattr(response, "text", None)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+
+        return None
+
     def _aggregate_token_usage(self, messages: list[Any]) -> QueryTokenUsage:
         total_tokens = input_tokens = output_tokens = cached_input_tokens = 0
         for message in messages:
@@ -287,6 +355,7 @@ def create_query_agent() -> LangChainQueryAgent:
     provider = os.getenv("QUERY_MODEL_PROVIDER", "groq").lower()
     model_name = os.getenv("QUERY_MODEL_NAME", "qwen/qwen3.8-27b")
     recursion_limit = int(os.getenv("AGENT_RECURSION_LIMIT", str(DEFAULT_RECURSION_LIMIT)))
+    max_output_tokens = int(os.getenv("QUERY_MODEL_MAX_TOKENS", str(DEFAULT_MAX_OUTPUT_TOKENS)))
 
     if provider == "groq":
         return LangChainQueryAgent(
@@ -294,6 +363,7 @@ def create_query_agent() -> LangChainQueryAgent:
             temperature=0.0,
             provider=provider,
             recursion_limit=recursion_limit,
+            max_output_tokens=max_output_tokens,
         )
 
     raise ValueError(f"Unsupported QUERY_MODEL_PROVIDER: {provider}")
