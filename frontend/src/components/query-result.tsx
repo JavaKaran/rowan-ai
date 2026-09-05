@@ -46,10 +46,7 @@ export function QueryResult({ result }: { result: Result }) {
   return (
     <div className="result">
       <div className="answer-heading">
-        <span className="mini-mark">r.</span>Rowan{" "}
-        <span className="badge">
-          {result.repaired ? "Completed after repair" : "Query complete"}
-        </span>
+        <span className="mini-mark">r.</span>Rowan
       </div>
       {result.summary && <p className="summary">{result.summary}</p>}
       <Tabs.Root defaultValue="data">
