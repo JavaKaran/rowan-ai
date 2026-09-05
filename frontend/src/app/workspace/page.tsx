@@ -285,9 +285,9 @@ export default function Workspace() {
                     </p>
                     <div className="suggestions">
                       {[
-                        "What tables can I explore?",
-                        "Give me an overview of my data",
-                        "What trends can you find?",
+                        "How many records are in my data?",
+                        "Show me 10 sample rows to explore",
+                        "Summarize the highlights in my data",
                       ].map((text) => (
                         <button key={text} onClick={() => setQuestion(text)}>
                           {text}
