@@ -511,6 +511,11 @@ footer .brand {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.session-empty {
+  padding: 12px 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
 .session-list-sentinel {
   display: flex;
   align-items: center;

@@ -12,7 +12,13 @@ from app.repositories import (
     SessionRepository,
     WorkspaceRepository,
 )
-from app.schemas import SessionCreate, SessionListResponse, SessionResponse, SessionUpdate
+from app.schemas import (
+    SessionCreate,
+    SessionListResponse,
+    SessionMetadata,
+    SessionResponse,
+    SessionUpdate,
+)
 from app.services import SessionService
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -40,7 +46,12 @@ def create_session(
     service: SessionService = Depends(get_session_service),
 ) -> SessionResponse:
     session = service.create_session(workspace_key, payload.name)
-    return SessionResponse.model_validate(session)
+    return SessionResponse(
+        session_key=session.session_key,
+        name=session.name,
+        metadata=SessionMetadata(),
+        messages=[],
+    )
 
 
 @router.get("/", response_model=SessionListResponse)
@@ -69,4 +80,10 @@ def update_session(
     service: SessionService = Depends(get_session_service),
 ) -> SessionResponse:
     session = service.update_session(workspace_key, session_key, payload.name)
-    return SessionResponse.model_validate(session)
+    metadata = service.get_session_metadata(session.id)
+    return SessionResponse(
+        session_key=session.session_key,
+        name=session.name,
+        is_connected=metadata.is_connected,
+        metadata=metadata,
+    )

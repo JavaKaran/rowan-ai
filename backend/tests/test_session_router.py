@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -197,6 +198,29 @@ class SessionRouterTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
 
+    def test_create_session_returns_detail_with_default_metadata(self):
+        response = self.client.post(
+            "/session/",
+            headers={"X-Workspace-Key": "workspace-key"},
+            json={},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "session_key": "sess_new",
+                "name": None,
+                "is_connected": False,
+                "metadata": {
+                    "database_name": None,
+                    "database_type": None,
+                    "is_connected": False,
+                },
+                "messages": [],
+            },
+        )
+
 
 class FakeSessionService:
     def __init__(self, history=None, list_response=None, is_connected=False, metadata=None):
@@ -223,3 +247,6 @@ class FakeSessionService:
     def list_sessions(self, workspace_key, page=1):
         self.list_calls.append((workspace_key, page))
         return self.list_response
+
+    def create_session(self, workspace_key, name=None):
+        return SimpleNamespace(session_key="sess_new", name=name)

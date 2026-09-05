@@ -13,6 +13,9 @@ export async function request<T>(
   context?: Context,
   body?: unknown,
 ): Promise<T> {
+  if (context && !context.workspace) {
+    throw new Error("Workspace is not ready yet. Please try again.");
+  }
   let response: Response;
   try {
     response = await fetch(`/api/${path}`, {

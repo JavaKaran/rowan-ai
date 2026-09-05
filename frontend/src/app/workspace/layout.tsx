@@ -160,6 +160,7 @@ export default function WorkspaceLayout({
   const session = visibleSessions.find(
     (item) => item.session_key === active,
   );
+  const autoCreateRef = useRef(false);
   useEffect(() => {
     if (!initialSessionKey) {
       setActive(undefined);
@@ -252,6 +253,27 @@ export default function WorkspaceLayout({
     sessionLookup.isPending &&
     currentTurns.length === 0;
   useEffect(() => {
+    if (
+      !isSessionRoute &&
+      workspace.data &&
+      sessionsQuery.isSuccess &&
+      apiSessions.length === 0 &&
+      visibleSessions.length === 0 &&
+      !newSession.isPending &&
+      !autoCreateRef.current
+    ) {
+      autoCreateRef.current = true;
+      newSession.mutate();
+    }
+  }, [
+    isSessionRoute,
+    workspace.data,
+    sessionsQuery.isSuccess,
+    apiSessions,
+    visibleSessions.length,
+    newSession.isPending,
+  ]);
+  useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentTurns.length, query.isPending]);
   function ask(text: string) {
@@ -317,6 +339,9 @@ export default function WorkspaceLayout({
               <span>{sessionDisplayName(item)}</span>
             </button>
           ))}
+          {sessionsQuery.isSuccess && visibleSessions.length === 0 && (
+            <p className="session-empty">No conversations found.</p>
+          )}
           {sessionsQuery.hasNextPage && (
             <div ref={sentinelRef} className="session-list-sentinel">
               {sessionsQuery.isFetchingNextPage && (
@@ -399,37 +424,47 @@ export default function WorkspaceLayout({
           </div>
         ) : !session ? (
           <div className="center-state">
-            <div className="large-icon">
-              <MessageSquare size={27} />
-            </div>
-            {isSessionRoute && sessionLookup.isPending ? (
+            {newSession.isPending ? (
               <>
-                <h1>Opening conversation.</h1>
-                <p>Loading this session for your workspace.</p>
-              </>
-            ) : isSessionRoute && sessionLookup.error ? (
-              <>
-                <h1>Conversation not found.</h1>
-                <p role="alert">
-                  This session is unavailable for the current workspace.
-                </p>
+                <LoaderCircle size={28} className="spin" />
+                <h1>Setting up your conversation.</h1>
+                <p>Creating a new conversation and fetching its details.</p>
               </>
             ) : (
               <>
-                <h1>No conversation selected.</h1>
-                <p>Select a conversation from the sidebar or start a new one.</p>
-                <button
-                  className="button"
-                  disabled={!workspace.data || newSession.isPending}
-                  onClick={() => newSession.mutate()}
-                >
-                  {newSession.isPending ? (
-                    <LoaderCircle size={16} className="spin" />
-                  ) : (
-                    <Plus size={16} />
-                  )}
-                  Start a conversation
-                </button>
+                <div className="large-icon">
+                  <MessageSquare size={27} />
+                </div>
+                {isSessionRoute && sessionLookup.isPending ? (
+                  <>
+                    <h1>Opening conversation.</h1>
+                    <p>Loading this session for your workspace.</p>
+                  </>
+                ) : isSessionRoute && sessionLookup.error ? (
+                  <>
+                    <h1>Conversation not found.</h1>
+                    <p role="alert">
+                      This session is unavailable for the current workspace.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h1>No conversation selected.</h1>
+                    <p>Select a conversation from the sidebar or start a new one.</p>
+                    <button
+                      className="button"
+                      disabled={!workspace.data || newSession.isPending}
+                      onClick={() => newSession.mutate()}
+                    >
+                      {newSession.isPending ? (
+                        <LoaderCircle size={16} className="spin" />
+                      ) : (
+                        <Plus size={16} />
+                      )}
+                      Start a conversation
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
