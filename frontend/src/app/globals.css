@@ -429,6 +429,10 @@ footer .brand {
   display: flex;
   flex-direction: column;
   padding: 24px 17px;
+  transition:
+    margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.25s ease,
+    visibility 0s;
 }
 .sidebar-heading {
   display: flex;
@@ -522,11 +526,32 @@ footer .brand {
   font-weight: 500;
   color: var(--ink);
 }
-.header-slash {
-  color: #bcc4b8;
+.workspace-header .brand {
+  font-size: 22px;
+  color: var(--ink);
+}
+.header-db {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.2px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 320px;
+}
+.sidebar-collapsed .header-db {
+  margin-left: 12px;
 }
 .sidebar-collapsed .sidebar {
-  display: none;
+  margin-left: -251px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.25s ease,
+    visibility 0s linear 0.3s;
 }
 .center-state {
   flex: 1;
@@ -978,6 +1003,9 @@ input::placeholder {
   .sidebar {
     width: 210px;
   }
+  .sidebar-collapsed .sidebar {
+    margin-left: -211px;
+  }
   .closing {
     margin: 50px 30px;
   }
@@ -1066,6 +1094,9 @@ input::placeholder {
     width: 180px;
     padding: 18px 10px;
   }
+  .sidebar-collapsed .sidebar {
+    margin-left: -181px;
+  }
   .sidebar-heading {
     padding: 0;
   }
@@ -1084,10 +1115,6 @@ input::placeholder {
   }
   .workspace-header .badge {
     font-size: 9px;
-  }
-  .workspace-header > div > span:first-child,
-  .header-slash {
-    display: none;
   }
   .connection-container {
     padding: 28px 18px;
@@ -1129,6 +1156,10 @@ input::placeholder {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 9px;
+  }
+  .sidebar-collapsed .sidebar {
+    display: none;
+    margin-left: 0;
   }
   .sidebar-heading {
     margin: 0;

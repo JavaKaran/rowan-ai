@@ -188,26 +188,27 @@ export default function Workspace() {
         <header className="workspace-header">
           <div>
             {collapsed && (
-              <button
-                className="icon-button"
-                aria-label="Expand sidebar"
-                onClick={() => setCollapsed(false)}
-              >
-                <PanelLeftOpen size={19} />
-              </button>
+              <>
+                <Brand />
+                <button
+                  className="icon-button"
+                  aria-label="Expand sidebar"
+                  onClick={() => setCollapsed(false)}
+                >
+                  <PanelLeftOpen size={19} />
+                </button>
+              </>
             )}
-            <span>Workspace</span>
-            <span className="header-slash">/</span>
-            <strong>{session?.database || "Get started"}</strong>
+            <strong className="header-db">{session?.database || "Get started"}</strong>
+            <span className="badge">
+              <span
+                className={
+                  session?.database ? "status-dot" : "status-dot neutral"
+                }
+              />
+              {session?.database ? "Connected" : "No database connected"}
+            </span>
           </div>
-          <span className="badge">
-            <span
-              className={
-                session?.database ? "status-dot" : "status-dot neutral"
-              }
-            />
-            {session?.database ? "Connected" : "No database connected"}
-          </span>
         </header>
         {storageError && (
           <div className="error" role="alert">
