@@ -317,7 +317,6 @@ export default function WorkspaceLayout({
           <div>
             {collapsed && (
               <>
-                <Brand />
                 <button
                   className="icon-button"
                   aria-label="Expand sidebar"
@@ -325,6 +324,7 @@ export default function WorkspaceLayout({
                 >
                   <PanelLeftOpen size={19} />
                 </button>
+                <Brand />
               </>
             )}
             <strong className="header-db">{session?.database || "Get started"}</strong>
