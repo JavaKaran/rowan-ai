@@ -10,6 +10,7 @@ import {
   Code2,
 } from "lucide-react";
 import { Brand } from "@/components/brand";
+import { MysqlLogo, PostgresLogo } from "@/components/db-logos";
 export default function Home() {
   return (
     <div className="landing">
@@ -117,10 +118,10 @@ export default function Home() {
         <section className="compatibility">
           <span>At home with your database</span>
           <div>
-            <Database size={19} /> PostgreSQL
+            <PostgresLogo size={26} /> PostgreSQL
           </div>
           <div>
-            <Database size={19} /> MySQL
+            <MysqlLogo size={26} /> MySQL
           </div>
         </section>
         <section id="how-it-works" className="how">

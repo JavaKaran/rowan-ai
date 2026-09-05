@@ -559,14 +559,22 @@ footer .brand {
   color: var(--ink);
 }
 .header-db {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 16px;
   font-weight: 800;
   letter-spacing: -0.2px;
   color: var(--ink);
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 320px;
+}
+.header-db-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .sidebar-collapsed .header-db {
   margin-left: 12px;
@@ -1263,7 +1271,7 @@ input::placeholder {
     display: none;
   }
   .session-route .workspace-header .header-db {
-    display: block;
+    display: inline-flex;
     max-width: 38vw;
   }
   .session-route .workspace-header .badge {

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { ConnectionForm } from "@/components/connection-form";
+import { MysqlLogo, PostgresLogo } from "@/components/db-logos";
 import { QueryResult } from "@/components/query-result";
 import { ApiError, ensureWorkspace, request } from "@/lib/api";
 import type {
@@ -317,7 +318,8 @@ export default function WorkspaceLayout({
         onClick={() => setCollapsed(true)}
       />
       <main className="workspace-main">
-        <header className="workspace-header">
+        {isSessionRoute && (
+          <header className="workspace-header">
           <div>
             {collapsed && (
               <>
@@ -332,7 +334,14 @@ export default function WorkspaceLayout({
               </>
             )}
             <strong className="header-db">
-              {session?.database || (session?.is_connected ? "Connected" : "Get started")}
+              {session?.type === "postgresql" ? (
+                <PostgresLogo size={16} />
+              ) : session?.type === "mysql" ? (
+                <MysqlLogo size={16} />
+              ) : null}
+              <span className="header-db-name">
+                {session?.database || (session?.is_connected ? "Connected" : "Get started")}
+              </span>
             </strong>
             <span className="badge">
               <span
@@ -353,7 +362,8 @@ export default function WorkspaceLayout({
           >
             <Plus size={19} />
           </button>
-        </header>
+          </header>
+        )}
         {newSession.error && (
           <div className="error" role="alert">
             {newSession.error.message}
