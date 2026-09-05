@@ -1,12 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.dependencies import get_workspace_key
-from app.repositories import QueryRecordRepository, SessionRepository, WorkspaceRepository
-from app.schemas import SessionCreate, SessionResponse, SessionUpdate
+from app.repositories import (
+    MessageRepository,
+    QueryRecordRepository,
+    SessionRepository,
+    WorkspaceRepository,
+)
+from app.schemas import SessionCreate, SessionListResponse, SessionResponse, SessionUpdate
 from app.services import SessionService
 
 router = APIRouter(prefix="/session", tags=["session"])
@@ -16,7 +21,10 @@ def get_session_service(db: Session = Depends(get_db)) -> SessionService:
     repository = SessionRepository(db)
     workspace_repository = WorkspaceRepository(db)
     query_record_repository = QueryRecordRepository(db)
-    return SessionService(repository, workspace_repository, query_record_repository)
+    message_repository = MessageRepository(db)
+    return SessionService(
+        repository, workspace_repository, query_record_repository, message_repository
+    )
 
 
 @router.post("/", response_model=SessionResponse)
@@ -27,6 +35,15 @@ def create_session(
 ) -> SessionResponse:
     session = service.create_session(workspace_key, payload.name)
     return SessionResponse.model_validate(session)
+
+
+@router.get("/", response_model=SessionListResponse)
+def list_sessions(
+    page: Annotated[int, Query(ge=1)] = 1,
+    workspace_key: str = Depends(get_workspace_key),
+    service: SessionService = Depends(get_session_service),
+) -> SessionListResponse:
+    return service.list_sessions(workspace_key, page)
 
 
 @router.get("/{session_key}", response_model=SessionResponse)

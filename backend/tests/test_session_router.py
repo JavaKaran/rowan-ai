@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routers.session import get_session_service
-from app.schemas import QueryTokenUsage, SessionQueryHistoryItem
+from app.schemas import QueryTokenUsage, SessionListResponse, SessionQueryHistoryItem
 
 
 class SessionRouterTest(unittest.TestCase):
@@ -76,12 +76,84 @@ class SessionRouterTest(unittest.TestCase):
         self.assertEqual(body["messages"][0]["status"], "completed")
 
 
+    def test_list_sessions_requires_workspace_header(self):
+        response = self.client.get("/session/")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_list_sessions_returns_paginated_items(self):
+        app.dependency_overrides[get_session_service] = lambda: FakeSessionService(
+            list_response=SessionListResponse(
+                items=[
+                    {
+                        "session_key": "sess_1",
+                        "name": "Chat 1",
+                        "first_message": "How many users signed up last week?",
+                    }
+                ],
+                page=1,
+                page_size=20,
+                total=1,
+                total_pages=1,
+            )
+        )
+
+        response = self.client.get(
+            "/session/", headers={"X-Workspace-Key": "workspace-key"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            body["items"],
+            [
+                {
+                    "session_key": "sess_1",
+                    "name": "Chat 1",
+                    "first_message": "How many users signed up last week?",
+                }
+            ],
+        )
+        self.assertEqual(body["page"], 1)
+        self.assertEqual(body["page_size"], 20)
+        self.assertEqual(body["total"], 1)
+        self.assertEqual(body["total_pages"], 1)
+
+    def test_list_sessions_passes_page_query_param(self):
+        service = FakeSessionService(
+            list_response=SessionListResponse(
+                items=[], page=3, page_size=20, total=45, total_pages=3
+            )
+        )
+        app.dependency_overrides[get_session_service] = lambda: service
+
+        response = self.client.get(
+            "/session/?page=3", headers={"X-Workspace-Key": "workspace-key"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(service.list_calls, [("workspace-key", 3)])
+
+    def test_list_sessions_rejects_page_below_one(self):
+        response = self.client.get(
+            "/session/?page=0", headers={"X-Workspace-Key": "workspace-key"}
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+
 class FakeSessionService:
-    def __init__(self, history=None):
+    def __init__(self, history=None, list_response=None):
         self.history = history if history is not None else []
+        self.list_response = list_response
+        self.list_calls = []
 
     def get_session_by_key(self, workspace_key, session_key):
         return SimpleNamespace(id=1, session_key=session_key, name="Test session")
 
     def get_session_history(self, session_id):
         return self.history
+
+    def list_sessions(self, workspace_key, page=1):
+        self.list_calls.append((workspace_key, page))
+        return self.list_response

@@ -1,3 +1,5 @@
+import type { Context, Workspace } from "@/types";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -6,49 +8,6 @@ export class ApiError extends Error {
     super(message);
   }
 }
-export type Context = { workspace: string; session?: string };
-export type Connection = {
-  database_type: "postgresql" | "mysql";
-  host: string;
-  port: number;
-  database_name: string;
-  username: string;
-  password: string;
-  ssl_mode: string;
-};
-export type QueryResult = {
-  sql_query: string;
-  summary?: string;
-  columns: string[];
-  rows: Record<string, unknown>[];
-  row_count: number;
-  execution_time_ms: number;
-  truncated: boolean;
-  token_usage: {
-    total_tokens: number;
-    input_tokens: number;
-    output_tokens: number;
-    cached_input_tokens: number;
-  };
-  attempt_count: number;
-  repaired: boolean;
-  tool_calls: {
-    attempt_number: number;
-    name: string | null;
-    args: unknown;
-    result?: unknown;
-  }[];
-};
-export type SessionMessage = QueryResult & {
-  question: string;
-  status: string;
-  error_message?: string | null;
-};
-export type SessionDetail = {
-  session_key: string;
-  name: string | null;
-  messages: SessionMessage[];
-};
 export async function request<T>(
   path: string,
   context?: Context,
@@ -101,7 +60,7 @@ export function ensureWorkspace() {
           if (!(error instanceof ApiError) || error.status !== 404) throw error;
         }
       }
-      const data = await request<{ workspace_key: string }>(
+      const data = await request<Workspace>(
         "workspace/",
         undefined,
         { name: "" },

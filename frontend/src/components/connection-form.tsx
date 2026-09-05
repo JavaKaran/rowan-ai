@@ -2,7 +2,12 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Database, ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
-import { Connection, Context, request } from "@/lib/api";
+import { request } from "@/lib/api";
+import type {
+  Connection,
+  Context,
+  DatabaseConnectionResult,
+} from "@/types";
 export function ConnectionForm({
   context,
   onConnected,
@@ -13,12 +18,7 @@ export function ConnectionForm({
   const [type, setType] = useState<Connection["database_type"]>("postgresql");
   const mutation = useMutation({
     mutationFn: (data: Connection) =>
-      request<{
-        success: boolean;
-        message: string;
-        database_name: string;
-        database_type: string;
-      }>("connection/", context, data),
+      request<DatabaseConnectionResult>("connection/", context, data),
     onSuccess: (data) => {
       if (data.success) onConnected(data.database_name, data.database_type);
     },
@@ -167,9 +167,6 @@ export function ConnectionForm({
           never saved in your browser.
         </span>
       </div>
-      <p className="small-note">
-        The host must be reachable from the backend server.
-      </p>
     </div>
   );
 }

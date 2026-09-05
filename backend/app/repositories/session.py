@@ -32,3 +32,16 @@ class SessionRepository:
         self.db.refresh(session)
 
         return session
+
+    def list_for_workspace(
+        self, workspace_id: int, page: int, page_size: int
+    ) -> tuple[list[Session], int]:
+        query = self.db.query(Session).filter(Session.workspace_id == workspace_id)
+        total = query.count()
+        items = (
+            query.order_by(Session.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total

@@ -1,10 +1,24 @@
+import math
 from typing import Any
 
 from app.exceptions import SessionNotFound, WorkspaceNotFound
 from app.models import Session
-from app.repositories import QueryRecordRepository, SessionRepository, WorkspaceRepository
-from app.schemas import QueryToolCallInfo, QueryTokenUsage, SessionQueryHistoryItem
+from app.repositories import (
+    MessageRepository,
+    QueryRecordRepository,
+    SessionRepository,
+    WorkspaceRepository,
+)
+from app.schemas import (
+    QueryToolCallInfo,
+    QueryTokenUsage,
+    SessionListItem,
+    SessionListResponse,
+    SessionQueryHistoryItem,
+)
 from app.services.identifier import IdentifierService
+
+SESSION_LIST_PAGE_SIZE = 20
 
 
 class SessionService:
@@ -13,10 +27,12 @@ class SessionService:
         repository: SessionRepository,
         workspace_repository: WorkspaceRepository,
         query_record_repository: QueryRecordRepository | None = None,
+        message_repository: MessageRepository | None = None,
     ):
         self.repository = repository
         self.workspace_repository = workspace_repository
         self.query_record_repository = query_record_repository
+        self.message_repository = message_repository
 
     def create_session(self, workspace_key: str, name: str | None = None) -> Session:
         workspace = self.workspace_repository.get_by_key(workspace_key)
@@ -58,6 +74,35 @@ class SessionService:
 
         session.name = name
         return self.repository.update(session)
+
+    def list_sessions(self, workspace_key: str, page: int = 1) -> SessionListResponse:
+        workspace = self.workspace_repository.get_by_key(workspace_key)
+        if not workspace:
+            raise WorkspaceNotFound()
+
+        sessions, total = self.repository.list_for_workspace(
+            workspace.id, page, SESSION_LIST_PAGE_SIZE
+        )
+        return SessionListResponse(
+            items=[
+                SessionListItem(
+                    session_key=session.session_key,
+                    name=session.name,
+                    first_message=self._first_message(session),
+                )
+                for session in sessions
+            ],
+            page=page,
+            page_size=SESSION_LIST_PAGE_SIZE,
+            total=total,
+            total_pages=math.ceil(total / SESSION_LIST_PAGE_SIZE) if total else 0,
+        )
+
+    def _first_message(self, session: Any) -> str | None:
+        if not self.message_repository:
+            return None
+        first_message = self.message_repository.get_first_user_query(session.id)
+        return first_message.content if first_message else None
 
     def get_session_history(self, session_id: int) -> list[SessionQueryHistoryItem]:
         query_records = self.query_record_repository.list_for_session(session_id)

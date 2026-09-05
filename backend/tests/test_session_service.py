@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
+from app.exceptions import WorkspaceNotFound
 from app.services.session import SessionService
 
 
@@ -95,6 +96,109 @@ class SessionServiceHistoryTest(unittest.TestCase):
 
         self.assertTrue(history[0].repaired)
         self.assertEqual(history[0].token_usage.total_tokens, 0)
+
+
+class SessionServiceListTest(unittest.TestCase):
+    def test_list_sessions_returns_paginated_items(self):
+        sessions = [
+            SimpleNamespace(session_key=f"sess_{i}", name=f"Chat {i}") for i in range(3)
+        ]
+        repository = FakeSessionRepository(sessions=sessions, total=45)
+        workspace_repository = FakeWorkspaceRepository(SimpleNamespace(id=1))
+        service = SessionService(
+            repository=repository,
+            workspace_repository=workspace_repository,
+        )
+
+        result = service.list_sessions("workspace-key", page=2)
+
+        self.assertEqual(repository.calls, [(1, 2, 20)])
+        self.assertEqual(len(result.items), 3)
+        self.assertEqual(result.items[0].session_key, "sess_0")
+        self.assertEqual(result.page, 2)
+        self.assertEqual(result.page_size, 20)
+        self.assertEqual(result.total, 45)
+        self.assertEqual(result.total_pages, 3)
+
+    def test_list_sessions_includes_first_user_message(self):
+        sessions = [SimpleNamespace(id=0, session_key="sess_0", name=None)]
+        repository = FakeSessionRepository(sessions=sessions, total=1)
+        message_repository = FakeMessageRepository(
+            {0: SimpleNamespace(content="How many users signed up last week?")}
+        )
+        service = SessionService(
+            repository=repository,
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            message_repository=message_repository,
+        )
+
+        result = service.list_sessions("workspace-key")
+
+        self.assertEqual(
+            result.items[0].first_message, "How many users signed up last week?"
+        )
+
+    def test_list_sessions_first_message_is_none_when_no_messages_yet(self):
+        sessions = [SimpleNamespace(id=0, session_key="sess_0", name=None)]
+        repository = FakeSessionRepository(sessions=sessions, total=1)
+        service = SessionService(
+            repository=repository,
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            message_repository=FakeMessageRepository({}),
+        )
+
+        result = service.list_sessions("workspace-key")
+
+        self.assertIsNone(result.items[0].first_message)
+
+    def test_list_sessions_defaults_to_page_one(self):
+        repository = FakeSessionRepository(sessions=[], total=0)
+        service = SessionService(
+            repository=repository,
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+        )
+
+        result = service.list_sessions("workspace-key")
+
+        self.assertEqual(repository.calls, [(1, 1, 20)])
+        self.assertEqual(result.total_pages, 0)
+        self.assertEqual(result.items, [])
+
+    def test_list_sessions_raises_workspace_not_found(self):
+        service = SessionService(
+            repository=FakeSessionRepository(sessions=[], total=0),
+            workspace_repository=FakeWorkspaceRepository(None),
+        )
+
+        with self.assertRaises(WorkspaceNotFound):
+            service.list_sessions("missing-workspace")
+
+
+class FakeSessionRepository:
+    def __init__(self, sessions, total):
+        self.sessions = sessions
+        self.total = total
+        self.calls = []
+
+    def list_for_workspace(self, workspace_id, page, page_size):
+        self.calls.append((workspace_id, page, page_size))
+        return self.sessions, self.total
+
+
+class FakeMessageRepository:
+    def __init__(self, first_messages_by_session_id):
+        self.first_messages_by_session_id = first_messages_by_session_id
+
+    def get_first_user_query(self, session_id):
+        return self.first_messages_by_session_id.get(session_id)
+
+
+class FakeWorkspaceRepository:
+    def __init__(self, workspace):
+        self.workspace = workspace
+
+    def get_by_key(self, workspace_key):
+        return self.workspace
 
 
 class FakeQueryRecordRepository:

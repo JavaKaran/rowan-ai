@@ -502,6 +502,9 @@ footer .brand {
 .session-list button.active {
   background: #dee7d8;
 }
+.session-list button:not(.active):hover {
+  background: #e3e9dd;
+}
 .session-list button span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -512,6 +515,13 @@ footer .brand {
   font-size: 10px;
   color: var(--muted);
   margin-top: 5px;
+}
+.session-list-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  color: var(--muted);
 }
 .workspace-main {
   flex: 1;

@@ -2,7 +2,7 @@
 import * as Tabs from "@radix-ui/react-tabs";
 import { useState } from "react";
 import { Table2, Code2, Activity, Copy, Download, Check } from "lucide-react";
-import { QueryResult as Result } from "@/lib/api";
+import type { QueryResult as Result } from "@/types";
 function cell(value: unknown): string {
   return value === null || value === undefined
     ? "NULL"
