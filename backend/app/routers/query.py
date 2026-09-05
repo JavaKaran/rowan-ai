@@ -48,6 +48,7 @@ def get_query_service(db: Session = Depends(get_db)) -> QueryService:
     )
 
 
+@router.post("", response_model=QueryResponse, include_in_schema=False)
 @router.post("/", response_model=QueryResponse)
 def run_query(
     payload: QueryRequest,

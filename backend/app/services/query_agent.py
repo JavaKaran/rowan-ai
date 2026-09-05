@@ -25,6 +25,7 @@ AGENT_SYSTEM_PROMPT = (
     "call get_columns on the tables you actually plan to use, and call "
     "get_relationships when a join is needed. Only use tables and columns "
     "returned by these tools. Never guess schema. "
+    "Use the SQL dialect indicated by target_database_type exactly. "
     "For meta-questions about the database itself (e.g. what tables exist, "
     "what columns a table has), query the standard information_schema views "
     "(information_schema.tables, information_schema.columns) instead of the "
@@ -97,7 +98,12 @@ class LangChainQueryAgent:
         last_user_question: str | None = None,
         last_sql_query: str | None = None,
     ) -> QueryAgentResult:
-        user_message = self._build_user_message(question, last_user_question, last_sql_query)
+        user_message = self._build_user_message(
+            question,
+            metadata_json,
+            last_user_question,
+            last_sql_query,
+        )
         return self._run(metadata_json, user_message)
 
     def repair_sql(
@@ -112,6 +118,7 @@ class LangChainQueryAgent:
     ) -> QueryAgentResult:
         user_message = self._build_repair_message(
             question,
+            metadata_json,
             previous_sql,
             failure_category,
             failure_detail,
@@ -171,6 +178,7 @@ class LangChainQueryAgent:
     def _build_repair_message(
         self,
         question: str,
+        metadata_json: dict[str, Any],
         previous_sql: str,
         failure_category: str,
         failure_detail: str,
@@ -184,6 +192,8 @@ class LangChainQueryAgent:
             lines.append(f"last_sql_query: {last_sql_query}")
         if lines:
             lines.append("")
+        lines.extend(self._database_context_lines(metadata_json))
+        lines.append("")
         lines.append(f"Current user question:\n{question.strip()}")
         lines.append("")
         lines.append(
@@ -199,6 +209,7 @@ class LangChainQueryAgent:
     def _build_user_message(
         self,
         question: str,
+        metadata_json: dict[str, Any],
         last_user_question: str | None,
         last_sql_query: str | None,
     ) -> str:
@@ -209,8 +220,19 @@ class LangChainQueryAgent:
             lines.append(f"last_sql_query: {last_sql_query}")
         if lines:
             lines.append("")
+        lines.extend(self._database_context_lines(metadata_json))
+        lines.append("")
         lines.append(f"Current user question:\n{question.strip()}")
         return "\n".join(lines)
+
+    def _database_context_lines(self, metadata_json: dict[str, Any]) -> list[str]:
+        database_type = metadata_json.get("database_type", "unknown")
+        database_name = metadata_json.get("database_name", "unknown")
+        return [
+            f"target_database_type: {database_type}",
+            f"target_database_name: {database_name}",
+            "Generate SQL using exactly the target_database_type dialect.",
+        ]
 
     def _aggregate_token_usage(self, messages: list[Any]) -> QueryTokenUsage:
         total_tokens = input_tokens = output_tokens = cached_input_tokens = 0
@@ -263,7 +285,7 @@ class LangChainQueryAgent:
 
 def create_query_agent() -> LangChainQueryAgent:
     provider = os.getenv("QUERY_MODEL_PROVIDER", "groq").lower()
-    model_name = os.getenv("QUERY_MODEL_NAME", "qwen/qwen3.6-27b")
+    model_name = os.getenv("QUERY_MODEL_NAME", "qwen/qwen3.8-27b")
     recursion_limit = int(os.getenv("AGENT_RECURSION_LIMIT", str(DEFAULT_RECURSION_LIMIT)))
 
     if provider == "groq":

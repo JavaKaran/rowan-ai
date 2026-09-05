@@ -338,6 +338,12 @@ class LangChainQueryAgentTest(unittest.TestCase):
         )
 
         user_message = captured["input"]["messages"][0][1]
+        self.assertIn("target_database_type: postgresql", user_message)
+        self.assertIn("target_database_name: app_db", user_message)
+        self.assertIn(
+            "Generate SQL using exactly the target_database_type dialect.",
+            user_message,
+        )
         self.assertIn("last_user_question: Show orders by month", user_message)
         self.assertIn("last_sql_query: SELECT 1 FROM orders", user_message)
         self.assertIn("Current user question:\nNow only enterprise", user_message)
@@ -399,6 +405,8 @@ class LangChainQueryAgentTest(unittest.TestCase):
 
         self.assertEqual(result.sql_query, "SELECT id FROM users LIMIT 10")
         user_message = captured["input"]["messages"][0][1]
+        self.assertIn("target_database_type: postgresql", user_message)
+        self.assertIn("target_database_name: app_db", user_message)
         self.assertIn("SELECT id FROM users", user_message)
         self.assertIn("missing_limit", user_message)
         self.assertIn(
@@ -438,6 +446,8 @@ class LangChainQueryAgentTest(unittest.TestCase):
         )
 
         user_message = captured["input"]["messages"][0][1]
+        self.assertIn("target_database_type: postgresql", user_message)
+        self.assertIn("target_database_name: app_db", user_message)
         self.assertIn("last_user_question: Show orders by month", user_message)
         self.assertIn("last_sql_query: SELECT 1 FROM orders", user_message)
 

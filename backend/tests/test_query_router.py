@@ -54,6 +54,18 @@ class QueryRouterTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"], "X-Workspace-Key header is required")
 
+    def test_query_endpoint_accepts_path_without_trailing_slash(self):
+        response = self.client.post(
+            "/query",
+            headers={
+                "X-Workspace-Key": "workspace-key",
+                "X-Session-Key": "session-key",
+            },
+            json={"question": "List users"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+
 
 class FakeQueryService:
     def run_query(self, workspace_key, session_key, question):
