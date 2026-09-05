@@ -1,9 +1,12 @@
 import unittest
 from types import SimpleNamespace
 
+import groq
+import httpx
 from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 
-from app.exceptions import SQLGenerationFailed
+from app.exceptions import AgentRecursionLimitExceeded, SQLGenerationFailed, SQLGenerationTimedOut
 from app.services.query_agent import (
     GeneratedSQL,
     LangChainQueryAgent,
@@ -77,9 +80,11 @@ class FakeAgent:
     def __init__(self, state):
         self.state = state
         self.invoked_with = None
+        self.invoked_with_config = None
 
-    def invoke(self, input_):
+    def invoke(self, input_, config=None):
         self.invoked_with = input_
+        self.invoked_with_config = config
         return self.state
 
 
@@ -122,7 +127,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
 
         agent = LangChainQueryAgent(
             model_name="llama-3.3-70b-versatile",
-            llm_factory=lambda model_name, temperature: None,
+            llm_factory=lambda model_name, temperature, timeout_seconds: None,
             agent_factory=agent_factory,
         )
 
@@ -313,7 +318,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
         captured = {}
 
         def agent_factory(llm, tools, system_prompt, response_format):
-            def invoke(input_):
+            def invoke(input_, config=None):
                 captured["input"] = input_
                 return state
 
@@ -350,7 +355,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
 
     def test_generate_sql_raises_when_agent_invocation_fails(self):
         class FailingAgent:
-            def invoke(self, input_):
+            def invoke(self, input_, config=None):
                 raise RuntimeError("network down")
 
         agent = LangChainQueryAgent(
@@ -372,7 +377,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
         captured = {}
 
         def agent_factory(llm, tools, system_prompt, response_format):
-            def invoke(input_):
+            def invoke(input_, config=None):
                 captured["input"] = input_
                 return state
 
@@ -410,7 +415,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
         captured = {}
 
         def agent_factory(llm, tools, system_prompt, response_format):
-            def invoke(input_):
+            def invoke(input_, config=None):
                 captured["input"] = input_
                 return state
 
@@ -438,7 +443,7 @@ class LangChainQueryAgentTest(unittest.TestCase):
 
     def test_repair_sql_raises_when_agent_invocation_fails(self):
         class FailingAgent:
-            def invoke(self, input_):
+            def invoke(self, input_, config=None):
                 raise RuntimeError("network down")
 
         agent = LangChainQueryAgent(
@@ -455,6 +460,79 @@ class LangChainQueryAgentTest(unittest.TestCase):
                 failure_category="missing_limit",
                 failure_detail="needs a limit",
             )
+
+    def test_generate_sql_passes_configured_recursion_limit_to_invoke(self):
+        state = {
+            "messages": [],
+            "structured_response": GeneratedSQL(sql_query="SELECT 1", summary="ok"),
+        }
+        fake_agent = FakeAgent(state)
+        agent = LangChainQueryAgent(
+            model_name="m",
+            recursion_limit=7,
+            llm_factory=lambda *args: None,
+            agent_factory=lambda *args, **kwargs: fake_agent,
+        )
+
+        agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(fake_agent.invoked_with_config, {"recursion_limit": 7})
+
+    def test_generate_sql_raises_agent_recursion_limit_exceeded_on_graph_recursion_error(self):
+        class RecursingAgent:
+            def invoke(self, input_, config=None):
+                raise GraphRecursionError("too many steps")
+
+        agent = LangChainQueryAgent(
+            model_name="m",
+            llm_factory=lambda *args: None,
+            agent_factory=lambda *args, **kwargs: RecursingAgent(),
+        )
+
+        with self.assertRaises(AgentRecursionLimitExceeded):
+            agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+    def test_generate_sql_raises_sql_generation_timed_out_on_groq_timeout(self):
+        class TimingOutAgent:
+            def invoke(self, input_, config=None):
+                raise groq.APITimeoutError(request=httpx.Request("POST", "https://api.groq.com/x"))
+
+        agent = LangChainQueryAgent(
+            model_name="m",
+            llm_factory=lambda *args: None,
+            agent_factory=lambda *args, **kwargs: TimingOutAgent(),
+        )
+
+        with self.assertRaises(SQLGenerationTimedOut) as ctx:
+            agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(
+            str(ctx.exception),
+            "We're unable to complete your query at the moment. Please try again.",
+        )
+
+    def test_default_llm_factory_passes_configured_timeout_to_chat_groq(self):
+        captured = {}
+
+        def spy_llm_factory(model_name, temperature, timeout_seconds):
+            captured["timeout_seconds"] = timeout_seconds
+            return None
+
+        agent = LangChainQueryAgent(
+            model_name="m",
+            timeout_seconds=42.0,
+            llm_factory=spy_llm_factory,
+            agent_factory=lambda *args, **kwargs: FakeAgent(
+                {
+                    "messages": [],
+                    "structured_response": GeneratedSQL(sql_query="SELECT 1", summary="ok"),
+                }
+            ),
+        )
+
+        agent.generate_sql(question="x", metadata_json=SAMPLE_METADATA)
+
+        self.assertEqual(captured["timeout_seconds"], 42.0)
 
 
 if __name__ == "__main__":

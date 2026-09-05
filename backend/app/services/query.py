@@ -2,10 +2,12 @@ from typing import Any
 
 from app.core import get_logger, mask_value
 from app.exceptions import (
+    AgentRecursionLimitExceeded,
     DatabaseConnectionNotFound,
     DatabaseMetadataNotReady,
     SQLExecutionFailed,
     SQLGenerationFailed,
+    SQLGenerationTimedOut,
     SessionNotFound,
     WorkspaceNotFound,
 )
@@ -33,7 +35,7 @@ from app.services.query_agent import AGENT_SYSTEM_PROMPT
 from app.services.query_executor import SQLQueryExecutor
 from app.services.query_guardrails import BeforeGuardrail
 from app.services.query_prompt_builder import QueryPromptBuilder
-from app.services.query_repair import AttemptRecord, QueryRepairLoop
+from app.services.query_repair import AttemptRecord, GenerationOutcome, QueryRepairLoop
 
 logger = get_logger(__name__)
 
@@ -98,12 +100,49 @@ class QueryService:
             database_type=connection.database_type,
             database_name=connection.database_name,
         )
-        outcome = self.repair_loop.run(
-            question=validated_question,
-            metadata_json=metadata_json,
-            last_user_question=previous_context["last_user_question"],
-            last_sql_query=previous_context["last_sql_query"],
-        )
+        try:
+            outcome = self.repair_loop.run(
+                question=validated_question,
+                metadata_json=metadata_json,
+                last_user_question=previous_context["last_user_question"],
+                last_sql_query=previous_context["last_sql_query"],
+            )
+        except (AgentRecursionLimitExceeded, SQLGenerationTimedOut) as exc:
+            attempts_so_far = list(getattr(exc, "attempts_so_far", []) or [])
+            last_attempt = attempts_so_far[-1] if attempts_so_far else None
+            status = (
+                "agent_timeout"
+                if isinstance(exc, SQLGenerationTimedOut)
+                else "agent_recursion_limit_exceeded"
+            )
+            logger.warning(
+                "query.generation_infra_failure",
+                workspace_key=mask_value(workspace_key),
+                session_key=mask_value(session_key),
+                status=status,
+                attempts=len(attempts_so_far),
+            )
+            self._persist_query_turn(
+                workspace_id=workspace.id,
+                session_id=session.id,
+                connection=connection,
+                question=validated_question,
+                prompt_input=prompt_input,
+                sql_query=last_attempt.sql_query if last_attempt else "",
+                summary="",
+                token_usage=GenerationOutcome(
+                    success=False,
+                    sql_query=None,
+                    generation_result=None,
+                    attempts=attempts_so_far,
+                ).total_token_usage,
+                provider="unknown",
+                model_name="unknown",
+                query_status=status,
+                query_error_message=str(exc),
+                attempts=attempts_so_far,
+            )
+            raise
 
         if not outcome.success:
             last_attempt = outcome.attempts[-1] if outcome.attempts else None

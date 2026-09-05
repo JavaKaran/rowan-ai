@@ -8,11 +8,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database_connections import encrypt_password
 from app.exceptions import (
+    AgentRecursionLimitExceeded,
     DatabaseConnectionNotFound,
     DatabaseMetadataNotReady,
     GuardrailFailureCategory,
     SQLExecutionFailed,
     SQLGenerationFailed,
+    SQLGenerationTimedOut,
     UnsafeSQLQuery,
 )
 from app.services.query import QueryService
@@ -718,7 +720,53 @@ class QueryServiceTest(unittest.TestCase):
         )
         self.assertFalse(service.query_attempt_repository.created[0].passed)
 
-    def _build_service(self, connection="sentinel", metadata="sentinel"):
+    def test_run_query_persists_query_record_on_agent_recursion_limit_exceeded(self):
+        error = AgentRecursionLimitExceeded()
+        error.attempts_so_far = [
+            AttemptRecord(
+                attempt_number=1,
+                sql_query="SELECT id FROM users",
+                passed=False,
+                failure_category=GuardrailFailureCategory.MISSING_LIMIT,
+                failure_detail="Queries must include a LIMIT unless they are aggregate-only reads.",
+                token_usage=QueryTokenUsage(
+                    total_tokens=10, input_tokens=8, output_tokens=2, cached_input_tokens=0
+                ),
+                tool_calls=[],
+                latency_ms=5,
+            )
+        ]
+        service = self._build_service(repair_loop=FakeRepairLoop(error=error))
+
+        with self.assertRaises(AgentRecursionLimitExceeded):
+            service.run_query("workspace-key", "session-key", "List users")
+
+        self.assertEqual(
+            service.query_record_repository.created[0].status,
+            "agent_recursion_limit_exceeded",
+        )
+        self.assertEqual(
+            service.query_record_repository.created[0].sql_query,
+            "SELECT id FROM users",
+        )
+        self.assertEqual(len(service.query_attempt_repository.created), 1)
+
+    def test_run_query_persists_query_record_on_sql_generation_timed_out(self):
+        error = SQLGenerationTimedOut()
+        error.attempts_so_far = []
+        service = self._build_service(repair_loop=FakeRepairLoop(error=error))
+
+        with self.assertRaises(SQLGenerationTimedOut):
+            service.run_query("workspace-key", "session-key", "List users")
+
+        self.assertEqual(
+            service.query_record_repository.created[0].status,
+            "agent_timeout",
+        )
+        self.assertEqual(service.query_record_repository.created[0].sql_query, "")
+        self.assertEqual(len(service.query_attempt_repository.created), 0)
+
+    def _build_service(self, connection="sentinel", metadata="sentinel", repair_loop=None):
         if connection == "sentinel":
             connection = SimpleNamespace(id=10, database_type="postgresql", database_name="app_db")
         if metadata == "sentinel":
@@ -745,7 +793,7 @@ class QueryServiceTest(unittest.TestCase):
             query_attempt_repository=FakeQueryAttemptRepository(),
             prompt_builder=QueryPromptBuilder(),
             before_guardrail=FakeBeforeGuardrail(),
-            repair_loop=FakeRepairLoop(make_outcome(sql_query="SELECT 1")),
+            repair_loop=repair_loop or FakeRepairLoop(make_outcome(sql_query="SELECT 1")),
             query_executor=FakeExecutor(
                 QueryResponse(
                     sql_query="SELECT 1",
@@ -806,8 +854,9 @@ def make_outcome(
 
 
 class FakeRepairLoop:
-    def __init__(self, outcome):
+    def __init__(self, outcome=None, error=None):
         self.outcome = outcome
+        self.error = error
         self.calls = []
 
     def run(self, question, metadata_json, last_user_question=None, last_sql_query=None):
@@ -819,6 +868,8 @@ class FakeRepairLoop:
                 "last_sql_query": last_sql_query,
             }
         )
+        if self.error is not None:
+            raise self.error
         return self.outcome
 
 

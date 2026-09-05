@@ -9,12 +9,14 @@ from dotenv import load_dotenv
 
 from app.core import configure_logging, get_logger
 from app.exceptions import (
+    AgentRecursionLimitExceeded,
     DatabaseConnectionAlreadyExists,
     DatabaseConnectionNotFound,
     DatabaseMetadataNotReady,
     EncryptionKeyMissing,
     SQLExecutionFailed,
     SQLGenerationFailed,
+    SQLGenerationTimedOut,
     SessionAlreadyExists,
     SessionKeyMissing,
     SessionNotFound,
@@ -191,6 +193,27 @@ async def unsafe_sql_query_handler(request: Request, exc: UnsafeSQLQuery):
 @app.exception_handler(SQLGenerationFailed)
 async def sql_generation_failed_handler(request: Request, exc: SQLGenerationFailed):
     logger.error("query.generation_failed", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=502,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(SQLGenerationTimedOut)
+async def sql_generation_timed_out_handler(request: Request, exc: SQLGenerationTimedOut):
+    logger.error("query.generation_timed_out", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=504,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(AgentRecursionLimitExceeded)
+async def agent_recursion_limit_exceeded_handler(
+    request: Request,
+    exc: AgentRecursionLimitExceeded,
+):
+    logger.error("query.agent_recursion_limit_exceeded", path=request.url.path, error=str(exc))
     return JSONResponse(
         status_code=502,
         content={"detail": str(exc)},

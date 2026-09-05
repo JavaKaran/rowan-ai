@@ -2,7 +2,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.exceptions import GuardrailFailureCategory
+from app.exceptions import (
+    AgentRecursionLimitExceeded,
+    GuardrailFailureCategory,
+    SQLGenerationTimedOut,
+)
 from app.schemas import QueryTokenUsage
 from app.services.query_agent import LangChainQueryAgent, QueryAgentResult
 from app.services.query_guardrails import AfterGuardrail
@@ -86,23 +90,27 @@ class QueryRepairLoop:
 
         for attempt_number in range(1, self._max_attempts + 1):
             started_at = time.monotonic()
-            if attempt_number == 1:
-                generation_result = self._query_agent.generate_sql(
-                    question=question,
-                    metadata_json=metadata_json,
-                    last_user_question=last_user_question,
-                    last_sql_query=last_sql_query,
-                )
-            else:
-                generation_result = self._query_agent.repair_sql(
-                    question=question,
-                    metadata_json=metadata_json,
-                    previous_sql=previous_sql,
-                    failure_category=failure_category,
-                    failure_detail=failure_detail,
-                    last_user_question=last_user_question,
-                    last_sql_query=last_sql_query,
-                )
+            try:
+                if attempt_number == 1:
+                    generation_result = self._query_agent.generate_sql(
+                        question=question,
+                        metadata_json=metadata_json,
+                        last_user_question=last_user_question,
+                        last_sql_query=last_sql_query,
+                    )
+                else:
+                    generation_result = self._query_agent.repair_sql(
+                        question=question,
+                        metadata_json=metadata_json,
+                        previous_sql=previous_sql,
+                        failure_category=failure_category,
+                        failure_detail=failure_detail,
+                        last_user_question=last_user_question,
+                        last_sql_query=last_sql_query,
+                    )
+            except (AgentRecursionLimitExceeded, SQLGenerationTimedOut) as exc:
+                exc.attempts_so_far = list(attempts)
+                raise
             latency_ms = int((time.monotonic() - started_at) * 1000)
 
             guardrail_result = self._after_guardrail.check(

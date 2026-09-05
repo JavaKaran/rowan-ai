@@ -74,5 +74,26 @@ class SQLGenerationFailed(AppError):
     pass
 
 
+class SQLGenerationTimedOut(AppError):
+    def __init__(
+        self,
+        message: str = "We're unable to complete your query at the moment. Please try again.",
+    ):
+        super().__init__(message)
+        self.attempts_so_far: list = []
+
+
+class AgentRecursionLimitExceeded(AppError):
+    def __init__(
+        self,
+        message: str = (
+            "The assistant took too many steps trying to answer this question. "
+            "Please try again or rephrase your question."
+        ),
+    ):
+        super().__init__(message)
+        self.attempts_so_far: list = []
+
+
 class SQLExecutionFailed(AppError):
     pass
