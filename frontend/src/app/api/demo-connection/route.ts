@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Demo database details for the "try the demo" CTA. This route runs
-// server-side only, so these credentials are never sent to the browser.
-const DEMO_DB = {
-  database_type: "postgresql",
-  host: "ep-cold-fire-aw2fywl8-pooler.c-12.us-east-1.aws.neon.tech",
-  port: 5432,
-  database_name: "products",
-  username: "products_owner",
-  password: "npg_MySCBDI4O7Vj",
-  ssl_mode: "require",
-};
+function demoDbDetails() {
+  const host = (process.env.DEMO_DB_HOST || "").trim();
+  const database_name = (process.env.DEMO_DB_NAME || "").trim();
+  const username = (process.env.DEMO_DB_USERNAME || "").trim();
+  const password = process.env.DEMO_DB_PASSWORD || "";
+  if (!host || !database_name || !username || !password) return null;
+  return {
+    database_type: "postgresql",
+    host,
+    port: Number(process.env.DEMO_DB_PORT || 5432),
+    database_name,
+    username,
+    password,
+    ssl_mode: "require",
+  };
+}
 
 export async function POST(request: NextRequest) {
   const workspace = request.headers.get("X-Workspace-Key");
@@ -19,6 +24,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { detail: "Workspace and session are required." },
       { status: 400 },
+    );
+  }
+  const demoDb = demoDbDetails();
+  if (!demoDb) {
+    return NextResponse.json(
+      { detail: "Demo database is not configured." },
+      { status: 503 },
     );
   }
   try {
@@ -31,7 +43,7 @@ export async function POST(request: NextRequest) {
           "X-Workspace-Key": workspace,
           "X-Session-Key": session,
         },
-        body: JSON.stringify(DEMO_DB),
+        body: JSON.stringify(demoDb),
         cache: "no-store",
         signal: AbortSignal.timeout(180_000),
       },
