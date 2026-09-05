@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   PanelLeftClose,
   PanelLeftOpen,
+  RotateCcw,
 } from "lucide-react";
 import { Brand } from "@/components/brand";
 import { ConnectionForm } from "@/components/connection-form";
@@ -325,10 +326,11 @@ export default function Workspace() {
                         <div className="error" role="alert">
                           <p>{turn.error}</p>
                           <button
-                            className="text-button"
+                            className="text-button retry-button"
                             disabled={query.isPending}
                             onClick={() => ask(turn.question)}
                           >
+                            <RotateCcw size={14} />
                             Retry question
                           </button>
                         </div>
