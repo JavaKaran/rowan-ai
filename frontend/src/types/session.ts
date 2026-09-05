@@ -56,6 +56,15 @@ export type Session = SessionListItem & {
   type?: string;
 };
 
+export type DatabaseMetadataStatus = {
+  is_connected: boolean;
+  is_ready: boolean;
+  status: string | null;
+  progress_current: number;
+  progress_total: number;
+  error_message: string | null;
+};
+
 /** Local chat turn state for a session (not persisted by the backend). */
 export type Turn = {
   id: string;

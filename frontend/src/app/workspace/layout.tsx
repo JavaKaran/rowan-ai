@@ -18,6 +18,7 @@ import { QueryResult } from "@/components/query-result";
 import { ApiError, ensureWorkspace, request } from "@/lib/api";
 import type {
   QueryResult as Result,
+  DatabaseMetadataStatus,
   Session,
   SessionDetail,
   SessionListResponse,
@@ -247,6 +248,37 @@ export default function WorkspaceLayout({
     },
   });
   const currentTurns = active ? turns[active] || [] : [];
+  const metadataStatus = useQuery({
+    queryKey: ["metadata-status", workspace.data, active],
+    queryFn: () =>
+      request<DatabaseMetadataStatus>("connection/metadata-status", {
+        workspace: workspace.data!,
+        session: active!,
+      }),
+    enabled:
+      Boolean(workspace.data) &&
+      Boolean(active) &&
+      Boolean(session?.is_connected) &&
+      currentTurns.length === 0,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data || data.is_ready || data.status === "failed") return false;
+      return 2000;
+    },
+  });
+  const isPreparingSchema =
+    Boolean(session?.is_connected) &&
+    currentTurns.length === 0 &&
+    (!metadataStatus.data || !metadataStatus.data.is_ready);
+  const metadataFailed = metadataStatus.data?.status === "failed";
+  const schemaProgress =
+    metadataStatus.data &&
+    metadataStatus.data.progress_total > 0
+      ? `${metadataStatus.data.progress_current} of ${metadataStatus.data.progress_total} tables scanned`
+      : null;
+  const metadataStatusLabel = metadataStatus.data?.status
+    ? metadataStatus.data.status.replaceAll("_", " ")
+    : "checking status";
   const isDemoSession =
     Boolean(active) &&
     typeof window !== "undefined" &&
@@ -281,7 +313,13 @@ export default function WorkspaceLayout({
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [currentTurns.length, query.isPending]);
   function ask(text: string) {
-    if (!active || !session?.is_connected || !text.trim() || query.isPending)
+    if (
+      !active ||
+      !session?.is_connected ||
+      isPreparingSchema ||
+      !text.trim() ||
+      query.isPending
+    )
       return;
     const id = crypto.randomUUID();
     setTurns((previous) => ({
@@ -522,12 +560,45 @@ export default function WorkspaceLayout({
               <div className="conversation-inner">
                 {!currentTurns.length ? (
                   <div className="chat-welcome">
-                    <h1>What would you like to know?</h1>
-                    <p>
-                      Ask about your data in your own words.
-                      <br />
-                      We’ll bring back the results and the SQL behind them.
-                    </p>
+                    {isPreparingSchema ? (
+                      <>
+                        <h1>Your database is getting prepared.</h1>
+                        <p className="metadata-status-value">
+                          {metadataStatusLabel}
+                        </p>
+                        <p>
+                          Rowan is reading the schema so it can answer with the
+                          right tables and columns.
+                        </p>
+                        {schemaProgress && (
+                          <p className="schema-progress">{schemaProgress}</p>
+                        )}
+                        {metadataFailed && (
+                          <div className="error schema-error" role="alert">
+                            <p>
+                              {metadataStatus.data?.error_message ||
+                                "Schema preparation failed. Please check the connection and try again."}
+                            </p>
+                            <button
+                              className="text-button retry-button"
+                              onClick={() => metadataStatus.refetch()}
+                            >
+                              <RotateCcw size={14} />
+                              Check again
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <h1>What would you like to know?</h1>
+                        <p>
+                          Ask about your data in your own words.
+                          <br />
+                          We’ll bring back the results and the SQL behind them.
+                        </p>
+                      </>
+                    )}
                     <div className="suggestions">
                       {(isDemoSession
                         ? [
@@ -541,7 +612,11 @@ export default function WorkspaceLayout({
                             "Summarize the highlights in my data",
                           ]
                       ).map((text) => (
-                        <button key={text} onClick={() => setQuestion(text)}>
+                        <button
+                          key={text}
+                          disabled={isPreparingSchema}
+                          onClick={() => setQuestion(text)}
+                        >
                           {text}
                           <ArrowUp size={15} />
                         </button>
@@ -592,7 +667,11 @@ export default function WorkspaceLayout({
                 <div className="composer-row">
                   <textarea
                     aria-label="Ask a question about your data"
-                    placeholder="Ask anything about your data…"
+                    placeholder={
+                      isPreparingSchema
+                        ? "Your database is getting prepared..."
+                        : "Ask anything about your data..."
+                    }
                     value={question}
                     onChange={(event) => setQuestion(event.target.value)}
                     onKeyDown={(event) => {
@@ -607,12 +686,15 @@ export default function WorkspaceLayout({
                     }}
                     rows={2}
                     maxLength={10000}
+                    disabled={isPreparingSchema}
                   />
                   <button
                     className="send-button"
                     type="submit"
                     aria-label="Send question"
-                    disabled={!question.trim() || query.isPending}
+                    disabled={
+                      isPreparingSchema || !question.trim() || query.isPending
+                    }
                   >
                     {query.isPending ? (
                       <LoaderCircle size={18} className="spin" />

@@ -9,7 +9,11 @@ from app.repositories import (
     SessionRepository,
     WorkspaceRepository,
 )
-from app.schemas import DatabaseConnectionCreate, DatabaseConnectionResponse
+from app.schemas import (
+    DatabaseConnectionCreate,
+    DatabaseConnectionResponse,
+    DatabaseMetadataStatusResponse,
+)
 from app.services import DatabaseConnectionService
 from app.services.database_connection_runtime import DatabaseConnectionRuntime
 from app.services.metadata_jobs import MetadataJobDispatcher, get_metadata_job_dispatcher
@@ -49,4 +53,15 @@ def create_database_connection(
         message=connection.status_message,
         database_type=connection.database_type,
         database_name=connection.database_name,
+    )
+
+
+@router.get("/metadata-status", response_model=DatabaseMetadataStatusResponse)
+def get_database_metadata_status(
+    workspace_key: str = Depends(get_workspace_key),
+    session_key: str = Depends(get_session_key),
+    service: DatabaseConnectionService = Depends(get_database_connection_service),
+) -> DatabaseMetadataStatusResponse:
+    return DatabaseMetadataStatusResponse(
+        **service.get_metadata_status(workspace_key, session_key)
     )

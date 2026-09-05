@@ -6,6 +6,7 @@ export type {
   QueryTokenUsage,
 } from "./query";
 export type {
+  DatabaseMetadataStatus,
   Session,
   SessionDetail,
   SessionListItem,

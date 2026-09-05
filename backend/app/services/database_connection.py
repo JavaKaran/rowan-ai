@@ -141,6 +141,51 @@ class DatabaseConnectionService:
 
         return connection
 
+    def get_metadata_status(
+        self,
+        workspace_key: str,
+        session_key: str,
+    ) -> dict[str, int | bool | str | None]:
+        workspace = self.workspace_repository.get_by_key(workspace_key)
+        if not workspace:
+            raise WorkspaceNotFound()
+
+        session = self.session_repository.get_by_key(session_key, workspace.id)
+        if not session:
+            raise SessionNotFound()
+
+        connection = self.repository.get_successful_connection(session.id)
+        if not connection:
+            return {
+                "is_connected": False,
+                "is_ready": False,
+                "status": "not_connected",
+                "progress_current": 0,
+                "progress_total": 0,
+                "error_message": None,
+            }
+
+        metadata = self.metadata_repository.get_by_connection_id(connection.id)
+        if not metadata:
+            return {
+                "is_connected": True,
+                "is_ready": False,
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 0,
+                "error_message": None,
+            }
+
+        return {
+            "is_connected": True,
+            "is_ready": metadata.status == "completed"
+            and bool(metadata.metadata_json),
+            "status": metadata.status,
+            "progress_current": metadata.progress_current,
+            "progress_total": metadata.progress_total,
+            "error_message": metadata.error_message,
+        }
+
     def _is_same_connection(
         self,
         connection: DatabaseConnection,

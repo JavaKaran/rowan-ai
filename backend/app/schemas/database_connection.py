@@ -18,3 +18,12 @@ class DatabaseConnectionResponse(BaseModel):
     message: str
     database_type: str
     database_name: str
+
+
+class DatabaseMetadataStatusResponse(BaseModel):
+    is_connected: bool
+    is_ready: bool
+    status: str | None
+    progress_current: int
+    progress_total: int
+    error_message: str | None = None

@@ -36,7 +36,7 @@ class FakeInspector:
                 },
                 {
                     "name": "payload",
-                    "type": FakeJSONBType(),
+                    "type": JSONB(),
                     "nullable": True,
                     "default": None,
                 },
@@ -99,7 +99,7 @@ class FakeEnumType:
         return "VARCHAR(10)"
 
 
-class FakeJSONBType:
+class JSONB:
     def __str__(self):
         return "JSONB"
 
@@ -328,6 +328,68 @@ class DatabaseConnectionServiceReconnectTest(unittest.TestCase):
 
         self.assertEqual(metadata_repository.created_for_connection_ids, [123])
         self.assertEqual(dispatcher.enqueued_connection_ids, [123])
+
+    def test_metadata_status_is_not_ready_while_parsing(self):
+        metadata_repository = FakeConnectionMetadataRepository(
+            metadata=SimpleNamespace(
+                status="parsing_tables",
+                progress_current=3,
+                progress_total=10,
+                metadata_json=None,
+                error_message=None,
+            )
+        )
+        service = self._build_service(
+            FakeConnectionRepository(SimpleNamespace(id=123)),
+            metadata_repository,
+            FakeDispatcher(),
+        )
+
+        status = service.get_metadata_status("workspace-key", "session-key")
+
+        self.assertEqual(
+            status,
+            {
+                "is_connected": True,
+                "is_ready": False,
+                "status": "parsing_tables",
+                "progress_current": 3,
+                "progress_total": 10,
+                "error_message": None,
+            },
+        )
+
+    def test_metadata_status_is_ready_when_completed_with_metadata(self):
+        metadata_repository = FakeConnectionMetadataRepository(
+            metadata=SimpleNamespace(
+                status="completed",
+                progress_current=10,
+                progress_total=10,
+                metadata_json={"schemas": []},
+                error_message=None,
+            )
+        )
+        service = self._build_service(
+            FakeConnectionRepository(SimpleNamespace(id=123)),
+            metadata_repository,
+            FakeDispatcher(),
+        )
+
+        status = service.get_metadata_status("workspace-key", "session-key")
+
+        self.assertTrue(status["is_ready"])
+
+    def test_metadata_status_reports_not_connected_without_connection(self):
+        service = self._build_service(
+            FakeConnectionRepository(None),
+            FakeConnectionMetadataRepository(),
+            FakeDispatcher(),
+        )
+
+        status = service.get_metadata_status("workspace-key", "session-key")
+
+        self.assertEqual(status["status"], "not_connected")
+        self.assertFalse(status["is_connected"])
 
     def _build_service(
         self,

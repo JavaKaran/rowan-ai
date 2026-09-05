@@ -1,4 +1,8 @@
-from .database_connection import DatabaseConnectionCreate, DatabaseConnectionResponse
+from .database_connection import (
+    DatabaseConnectionCreate,
+    DatabaseConnectionResponse,
+    DatabaseMetadataStatusResponse,
+)
 from .query import QueryRequest, QueryResponse, QueryTokenUsage, QueryToolCallInfo
 from .session import (
     SessionCreate,
@@ -14,6 +18,7 @@ from .workspace import WorkspaceCreate, WorkspaceResponse, WorkspaceUpdate
 __all__ = [
     "DatabaseConnectionCreate",
     "DatabaseConnectionResponse",
+    "DatabaseMetadataStatusResponse",
     "QueryRequest",
     "QueryResponse",
     "QueryTokenUsage",
