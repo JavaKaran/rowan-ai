@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowUp,
@@ -22,6 +23,10 @@ import {
 type Session = { key: string; name: string; database?: string; type?: string };
 type Turn = { id: string; question: string; result?: Result; error?: string };
 export default function Workspace() {
+  const router = useRouter();
+  const params = useParams<{ sessionId?: string }>();
+  const initialSessionKey =
+    typeof params.sessionId === "string" ? params.sessionId : undefined;
   const workspace = useQuery({
     queryKey: ["workspace"],
     queryFn: ensureWorkspace,
@@ -47,7 +52,11 @@ export default function Workspace() {
           (s) => s && typeof s.key === "string" && typeof s.name === "string",
         );
         setSessions(valid);
-        setActive(valid[0]?.key);
+        setActive(
+          valid.some((item) => item.key === initialSessionKey)
+            ? initialSessionKey
+            : valid[0]?.key,
+        );
       }
     } catch {
       setStorageError(
@@ -55,7 +64,13 @@ export default function Workspace() {
       );
     }
     setLoaded(true);
-  }, [workspace.data]);
+  }, [initialSessionKey, workspace.data]);
+  useEffect(() => {
+    if (!loaded || !initialSessionKey) return;
+    if (sessions.some((item) => item.key === initialSessionKey)) {
+      setActive(initialSessionKey);
+    }
+  }, [initialSessionKey, loaded, sessions]);
   useEffect(() => {
     if (loaded && workspace.data) {
       try {
@@ -82,6 +97,7 @@ export default function Workspace() {
       setSessions((items) => [next, ...items]);
       setActive(next.key);
       setQuestion("");
+      router.push(`/workspace/session/${encodeURIComponent(next.key)}`);
     },
   });
   const query = useMutation({
@@ -172,6 +188,7 @@ export default function Workspace() {
               onClick={() => {
                 setActive(item.key);
                 setQuestion("");
+                router.push(`/workspace/session/${encodeURIComponent(item.key)}`);
               }}
             >
               <MessageSquare size={16} />
