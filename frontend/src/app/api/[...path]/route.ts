@@ -25,9 +25,13 @@ async function proxy(
         signal: AbortSignal.timeout(180_000),
       },
     );
+    const responseHeaders = new Headers({ "Content-Type": "application/json" });
+    const retryAfter = response.headers.get("Retry-After");
+    if (retryAfter) responseHeaders.set("Retry-After", retryAfter);
+
     return new NextResponse(await response.text(), {
       status: response.status,
-      headers: { "Content-Type": "application/json" },
+      headers: responseHeaders,
     });
   } catch {
     return NextResponse.json(

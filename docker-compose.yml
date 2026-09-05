@@ -17,6 +17,15 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: ai-sql-query-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+
   backend:
     build:
       context: ./backend
@@ -25,6 +34,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     ports:
       - "8000:8000"
     env_file:
@@ -32,6 +43,8 @@ services:
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GLOBAL_QUERY_RATE_LIMIT: ${GLOBAL_QUERY_RATE_LIMIT:-50}
     volumes:
       - ./backend/app:/app/app
     command: uv run fastapi dev app/main.py --host 0.0.0.0 --port 8000
@@ -56,5 +69,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   frontend_node_modules:
   frontend_next:

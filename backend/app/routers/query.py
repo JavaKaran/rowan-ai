@@ -22,6 +22,7 @@ from app.services.query_executor import SQLQueryExecutor
 from app.services.query_guardrails import AfterGuardrail, BeforeGuardrail
 from app.services.query_prompt_builder import QueryPromptBuilder
 from app.services.query_repair import QueryRepairLoop
+from app.services.rate_limit import RedisGlobalQueryRateLimiter, get_query_rate_limiter
 
 router = APIRouter(prefix="/query", tags=["query"])
 
@@ -55,7 +56,9 @@ def run_query(
     workspace_key: str = Depends(get_workspace_key),
     session_key: str = Depends(get_session_key),
     service: QueryService = Depends(get_query_service),
+    rate_limiter: RedisGlobalQueryRateLimiter = Depends(get_query_rate_limiter),
 ) -> QueryResponse:
+    rate_limiter.check()
     result = service.run_query(
         workspace_key=workspace_key,
         session_key=session_key,

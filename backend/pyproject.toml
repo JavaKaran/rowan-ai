@@ -18,4 +18,5 @@ dependencies = [
     "alembic>=1.18.5",
     "structlog>=25.5.0",
     "python-ulid>=3.2.0",
+    "redis>=7.1.0",
 ]

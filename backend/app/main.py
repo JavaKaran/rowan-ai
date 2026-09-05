@@ -17,6 +17,8 @@ from app.exceptions import (
     SQLExecutionFailed,
     SQLGenerationFailed,
     SQLGenerationTimedOut,
+    RateLimitExceeded,
+    RateLimitUnavailable,
     SessionAlreadyExists,
     SessionKeyMissing,
     SessionNotFound,
@@ -225,6 +227,29 @@ async def sql_execution_failed_handler(request: Request, exc: SQLExecutionFailed
     logger.warning("query.execution_failed", path=request.url.path, error=str(exc))
     return JSONResponse(
         status_code=400,
+        content={"detail": str(exc)},
+    )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    logger.warning(
+        "rate_limit.exceeded",
+        path=request.url.path,
+        retry_after_seconds=exc.retry_after_seconds,
+    )
+    return JSONResponse(
+        status_code=429,
+        content={"detail": str(exc), "retry_after_seconds": exc.retry_after_seconds},
+        headers={"Retry-After": str(exc.retry_after_seconds)},
+    )
+
+
+@app.exception_handler(RateLimitUnavailable)
+async def rate_limit_unavailable_handler(request: Request, exc: RateLimitUnavailable):
+    logger.error("rate_limit.unavailable", path=request.url.path, error=str(exc))
+    return JSONResponse(
+        status_code=503,
         content={"detail": str(exc)},
     )
 

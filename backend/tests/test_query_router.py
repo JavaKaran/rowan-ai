@@ -3,7 +3,8 @@ import unittest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.routers.query import get_query_service
+from app.exceptions import RateLimitExceeded
+from app.routers.query import get_query_rate_limiter, get_query_service
 from app.schemas import QueryResponse, QueryTokenUsage
 
 
@@ -11,6 +12,8 @@ class QueryRouterTest(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
         app.dependency_overrides[get_query_service] = lambda: FakeQueryService()
+        self.rate_limiter = FakeRateLimiter()
+        app.dependency_overrides[get_query_rate_limiter] = lambda: self.rate_limiter
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -26,6 +29,7 @@ class QueryRouterTest(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.rate_limiter.calls, 1)
         self.assertEqual(
             response.json(),
             {
@@ -66,6 +70,25 @@ class QueryRouterTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_query_endpoint_returns_429_when_global_limit_is_exceeded(self):
+        self.rate_limiter.error = RateLimitExceeded(
+            "Too many queries are running on this deployment. Please try again later.",
+            retry_after_seconds=120,
+        )
+
+        response = self.client.post(
+            "/query/",
+            headers={
+                "X-Workspace-Key": "workspace-key",
+                "X-Session-Key": "session-key",
+            },
+            json={"question": "List users"},
+        )
+
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(response.headers["Retry-After"], "120")
+        self.assertEqual(response.json()["retry_after_seconds"], 120)
+
 
 class FakeQueryService:
     def run_query(self, workspace_key, session_key, question):
@@ -84,3 +107,14 @@ class FakeQueryService:
                 cached_input_tokens=4,
             ),
         )
+
+
+class FakeRateLimiter:
+    def __init__(self):
+        self.calls = 0
+        self.error = None
+
+    def check(self):
+        self.calls += 1
+        if self.error:
+            raise self.error
