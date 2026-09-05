@@ -641,6 +641,47 @@ footer .brand {
 .connection-panel form {
   margin-top: 27px;
 }
+.demo-cta {
+  margin-top: 24px;
+  background: var(--pale);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px;
+}
+.demo-cta .demo-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.demo-cta .demo-sub {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.demo-cta .demo-button {
+  width: 100%;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.demo-cta .error {
+  margin: 12px 0 0;
+}
+.or-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.or-separator::before,
+.or-separator::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
 fieldset {
   border: 0;
   padding: 0;

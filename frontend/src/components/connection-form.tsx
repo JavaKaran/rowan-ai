@@ -13,7 +13,7 @@ export function ConnectionForm({
   onConnected,
 }: {
   context: Context;
-  onConnected: (name: string, type: string) => void;
+  onConnected: (name: string, type: string, isDemo?: boolean) => void;
 }) {
   const [type, setType] = useState<Connection["database_type"]>("postgresql");
   const mutation = useMutation({
@@ -23,6 +23,14 @@ export function ConnectionForm({
       if (data.success) onConnected(data.database_name, data.database_type);
     },
   });
+  const demo = useMutation({
+    mutationFn: () =>
+      request<DatabaseConnectionResult>("demo-connection/", context, {}),
+    onSuccess: (data) => {
+      if (data.success)
+        onConnected(data.database_name, data.database_type, true);
+    },
+  });
   return (
     <div className="connection-panel">
       <div className="large-icon">
@@ -30,6 +38,38 @@ export function ConnectionForm({
       </div>
       <h1>Meet your database.</h1>
       <p>Connect a database to start a conversation with your data.</p>
+      <div className="demo-cta">
+        <p className="demo-title">Try it instantly, no setup needed</p>
+        <p className="demo-sub">
+          Connect the sample products database and start asking questions
+          right away.
+        </p>
+        <button
+          className="button demo-button"
+          onClick={() => demo.mutate()}
+          disabled={demo.isPending || mutation.isPending}
+        >
+          {demo.isPending ? (
+            <>
+              <LoaderCircle className="spin" size={17} />
+              Connecting…
+            </>
+          ) : (
+            <>
+              Connect demo DB
+              <ArrowRight size={17} />
+            </>
+          )}
+        </button>
+        {(demo.error || demo.data?.success === false) && (
+          <div className="error" role="alert">
+            {demo.error?.message || demo.data?.message}
+          </div>
+        )}
+      </div>
+      <div className="or-separator" aria-hidden="true">
+        OR
+      </div>
       <form
         onSubmit={(event) => {
           event.preventDefault();

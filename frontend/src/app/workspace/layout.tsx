@@ -247,6 +247,10 @@ export default function WorkspaceLayout({
     },
   });
   const currentTurns = active ? turns[active] || [] : [];
+  const isDemoSession =
+    Boolean(active) &&
+    typeof window !== "undefined" &&
+    localStorage.getItem(`rowan.demo.${active}`) === "1";
   const isHydratingActive =
     Boolean(active) &&
     active === initialSessionKey &&
@@ -271,7 +275,7 @@ export default function WorkspaceLayout({
     sessionsQuery.isSuccess,
     apiSessions,
     visibleSessions.length,
-    newSession.isPending,
+    newSession,
   ]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
@@ -479,7 +483,18 @@ export default function WorkspaceLayout({
             <ConnectionForm
               key={session.session_key}
               context={{ workspace: workspace.data!, session: session.session_key }}
-              onConnected={(database, type) =>
+              onConnected={(database, type, isDemo) => {
+                try {
+                  if (isDemo)
+                    localStorage.setItem(
+                      `rowan.demo.${session.session_key}`,
+                      "1",
+                    );
+                  else
+                    localStorage.removeItem(`rowan.demo.${session.session_key}`);
+                } catch {
+                  /* storage unavailable: demo suggestions just won't persist */
+                }
                 setSessions((items) =>
                   items.map((item) =>
                     item.session_key === session.session_key
@@ -496,8 +511,8 @@ export default function WorkspaceLayout({
                         }
                       : item,
                   ),
-                )
-              }
+                );
+              }}
             />
             </div>
           )
@@ -514,11 +529,18 @@ export default function WorkspaceLayout({
                       We’ll bring back the results and the SQL behind them.
                     </p>
                     <div className="suggestions">
-                      {[
-                        "How many records are in my data?",
-                        "Show me 10 sample rows to explore",
-                        "Summarize the highlights in my data",
-                      ].map((text) => (
+                      {(isDemoSession
+                        ? [
+                            "How many products are in each category?",
+                            "Which brands have the most products?",
+                            "Show me 10 sample products with their brands",
+                          ]
+                        : [
+                            "How many records are in my data?",
+                            "Show me 10 sample rows to explore",
+                            "Summarize the highlights in my data",
+                          ]
+                      ).map((text) => (
                         <button key={text} onClick={() => setQuestion(text)}>
                           {text}
                           <ArrowUp size={15} />
