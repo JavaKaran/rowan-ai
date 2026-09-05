@@ -614,8 +614,9 @@ export default function WorkspaceLayout({
                       ).map((text) => (
                         <button
                           key={text}
+                          type="button"
                           disabled={isPreparingSchema}
-                          onClick={() => setQuestion(text)}
+                          onClick={() => ask(text)}
                         >
                           {text}
                           <ArrowUp size={15} />
