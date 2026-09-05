@@ -134,6 +134,11 @@ class SessionRouterTest(unittest.TestCase):
                         "name": "Chat 1",
                         "first_message": "How many users signed up last week?",
                         "is_connected": True,
+                        "metadata": {
+                            "database_name": "analytics",
+                            "database_type": "postgresql",
+                            "is_connected": True,
+                        },
                     }
                 ],
                 page=1,
@@ -157,6 +162,11 @@ class SessionRouterTest(unittest.TestCase):
                     "name": "Chat 1",
                     "first_message": "How many users signed up last week?",
                     "is_connected": True,
+                    "metadata": {
+                        "database_name": "analytics",
+                        "database_type": "postgresql",
+                        "is_connected": True,
+                    },
                 }
             ],
         )

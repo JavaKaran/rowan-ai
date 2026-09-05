@@ -101,7 +101,8 @@ class SessionServiceHistoryTest(unittest.TestCase):
 class SessionServiceListTest(unittest.TestCase):
     def test_list_sessions_returns_paginated_items(self):
         sessions = [
-            SimpleNamespace(session_key=f"sess_{i}", name=f"Chat {i}") for i in range(3)
+            SimpleNamespace(id=i, session_key=f"sess_{i}", name=f"Chat {i}")
+            for i in range(3)
         ]
         repository = FakeSessionRepository(sessions=sessions, total=45)
         workspace_repository = FakeWorkspaceRepository(SimpleNamespace(id=1))
@@ -167,6 +168,32 @@ class SessionServiceListTest(unittest.TestCase):
 
         self.assertTrue(result.items[0].is_connected)
         self.assertFalse(result.items[1].is_connected)
+
+    def test_list_sessions_includes_metadata_matching_detail(self):
+        sessions = [SimpleNamespace(id=1, session_key="sess_0", name=None)]
+        repository = FakeSessionRepository(sessions=sessions, total=1)
+        service = SessionService(
+            repository=repository,
+            workspace_repository=FakeWorkspaceRepository(SimpleNamespace(id=1)),
+            query_record_repository=FakeQueryRecordRepository([]),
+            database_connection_repository=FakeDatabaseConnectionRepository(
+                {1},
+                {
+                    1: SimpleNamespace(
+                        database_name="analytics",
+                        database_type="mysql",
+                    )
+                },
+            ),
+        )
+
+        result = service.list_sessions("workspace-key")
+        detail = service.get_session_detail("workspace-key", "sess_0")
+
+        self.assertEqual(result.items[0].metadata.database_name, "analytics")
+        self.assertEqual(result.items[0].metadata.database_type, "mysql")
+        self.assertTrue(result.items[0].metadata.is_connected)
+        self.assertEqual(result.items[0].metadata, detail.metadata)
 
     def test_list_sessions_is_connected_defaults_false_without_repository(self):
         sessions = [SimpleNamespace(id=1, session_key="sess_0", name=None)]

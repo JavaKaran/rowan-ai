@@ -25,7 +25,11 @@ import type {
 } from "@/types";
 function sessionDisplayName(item: Session): string {
   return (
-    item.name || item.first_message?.slice(0, 46) || "New conversation"
+    item.name ||
+    item.first_message?.slice(0, 46) ||
+    item.metadata?.database_name ||
+    item.database ||
+    "New conversation"
   );
 }
 export default function WorkspaceLayout({
@@ -74,6 +78,11 @@ export default function WorkspaceLayout({
       name: data.name,
       first_message: data.messages[0]?.question ?? null,
       is_connected: data.metadata?.is_connected ?? data.is_connected,
+      metadata: {
+        database_name: data.metadata?.database_name ?? null,
+        database_type: data.metadata?.database_type ?? null,
+        is_connected: data.metadata?.is_connected ?? data.is_connected,
+      },
       database: data.metadata?.database_name ?? undefined,
       type: data.metadata?.database_type ?? undefined,
     };
@@ -141,6 +150,7 @@ export default function WorkspaceLayout({
           name: local?.name ?? item.name,
           first_message: local?.first_message ?? item.first_message,
           is_connected: local?.is_connected ?? item.is_connected,
+          metadata: local?.metadata ?? item.metadata,
           database: local?.database,
           type: local?.type,
         };
@@ -190,6 +200,11 @@ export default function WorkspaceLayout({
         name: null,
         first_message: null,
         is_connected: false,
+        metadata: {
+          database_name: null,
+          database_type: null,
+          is_connected: false,
+        },
       };
       setSessions((items) => [next, ...items]);
       setActive(next.session_key);
@@ -433,7 +448,17 @@ export default function WorkspaceLayout({
                 setSessions((items) =>
                   items.map((item) =>
                     item.session_key === session.session_key
-                      ? { ...item, database, type, is_connected: true }
+                      ? {
+                          ...item,
+                          database,
+                          type,
+                          is_connected: true,
+                          metadata: {
+                            database_name: database,
+                            database_type: type,
+                            is_connected: true,
+                          },
+                        }
                       : item,
                   ),
                 )

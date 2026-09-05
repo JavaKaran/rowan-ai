@@ -40,6 +40,7 @@ class SessionListItem(BaseModel):
     name: str | None = None
     first_message: str | None = None
     is_connected: bool = False
+    metadata: SessionMetadata = Field(default_factory=SessionMetadata)
 
     model_config = {
         "from_attributes": True

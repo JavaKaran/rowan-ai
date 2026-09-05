@@ -89,19 +89,21 @@ class SessionService:
             workspace.id, page, SESSION_LIST_PAGE_SIZE
         )
         return SessionListResponse(
-            items=[
-                SessionListItem(
-                    session_key=session.session_key,
-                    name=session.name,
-                    first_message=self._first_message(session),
-                    is_connected=self._is_connected(session),
-                )
-                for session in sessions
-            ],
+            items=[self._to_list_item(session) for session in sessions],
             page=page,
             page_size=SESSION_LIST_PAGE_SIZE,
             total=total,
             total_pages=math.ceil(total / SESSION_LIST_PAGE_SIZE) if total else 0,
+        )
+
+    def _to_list_item(self, session: Any) -> SessionListItem:
+        metadata = self.get_session_metadata(session.id)
+        return SessionListItem(
+            session_key=session.session_key,
+            name=session.name,
+            first_message=self._first_message(session),
+            is_connected=metadata.is_connected,
+            metadata=metadata,
         )
 
     def is_session_connected(self, session_id: int) -> bool:
@@ -135,11 +137,6 @@ class SessionService:
             metadata=metadata,
             messages=self.get_session_history(session.id),
         )
-
-    def _is_connected(self, session: Any) -> bool:
-        if not self.database_connection_repository:
-            return False
-        return self.database_connection_repository.has_successful_connection(session.id)
 
     def _first_message(self, session: Any) -> str | None:
         if not self.message_repository:

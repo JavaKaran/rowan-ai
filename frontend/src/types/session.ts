@@ -33,6 +33,7 @@ export type SessionListItem = {
   name: string | null;
   first_message: string | null;
   is_connected: boolean;
+  metadata: SessionMetadata;
 };
 
 export type SessionListResponse = {
